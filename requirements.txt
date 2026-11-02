@@ -1,0 +1,21 @@
+# LLMAC v2 — requirements
+
+# GUI mode (optional): PyQt6
+#   pip install PyQt6
+#
+# Headless host + CLI: pure Python standard library — no dependencies.
+#
+# TLS: uses the `openssl` CLI binary (present on Linux/macOS and most
+# Windows dev boxes via Git for Windows). If absent, TLS falls back to
+# plain HTTP with a warning — keep the host on localhost in that case.
+#
+# Optional future adapters (not required by the core):
+#   pip install mcp        # MCP adapter for tool-native clients
+PyQt6>=6.5
+
+# Screen channel (v2.7.0 — ASK-016/017; venv-only, optional):
+#   screen.shot capture itself is Qt/Spectacle; observe + the window
+#   list + input injection need these three in the host venv.
+pytesseract>=0.3
+Pillow>=10
+python-xlib>=0.33

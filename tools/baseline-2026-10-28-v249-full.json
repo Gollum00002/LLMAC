@@ -1,0 +1,968 @@
+{
+ "meta": {
+  "ts": "2026-10-28T17:28:47",
+  "server_version": "2.4.9",
+  "policy": "auto_all",
+  "host": "103.110.79.8",
+  "repo": "/mnt/Tera/Process/llmac-work/llmac",
+  "client_python": "3.12.16"
+ },
+ "scenarios": {
+  "S1_fixed_overhead": {
+   "notes": "per-call fixed cost decomposition",
+   "calls": 18,
+   "cli_calls": 11,
+   "req_bytes": 0,
+   "wire_bytes": 7506,
+   "decoded_bytes": 7506,
+   "est_tokens": 2901,
+   "cli_output_bytes": 4100,
+   "wall_s": 8.756,
+   "call_log": [
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.169,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.2088,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.1686,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.1694,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.209,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.1696,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.1685,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.209,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.1686,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.1702,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.2093,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.1682,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.1685,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.21,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.1683,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.3528,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.3401,
+     "status": 200
+    },
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.3204,
+     "status": 200
+    }
+   ],
+   "cli_log": [
+    {
+     "args": "--version",
+     "wall_s": 0.0715,
+     "stdout_bytes": 12,
+     "stderr_bytes": 0,
+     "rc": 0
+    },
+    {
+     "args": "--version",
+     "wall_s": 0.0669,
+     "stdout_bytes": 12,
+     "stderr_bytes": 0,
+     "rc": 0
+    },
+    {
+     "args": "--version",
+     "wall_s": 0.0659,
+     "stdout_bytes": 12,
+     "stderr_bytes": 0,
+     "rc": 0
+    },
+    {
+     "args": "info",
+     "wall_s": 0.6074,
+     "stdout_bytes": 508,
+     "stderr_bytes": 0,
+     "rc": 0
+    },
+    {
+     "args": "info",
+     "wall_s": 0.5957,
+     "stdout_bytes": 508,
+     "stderr_bytes": 0,
+     "rc": 0
+    },
+    {
+     "args": "info",
+     "wall_s": 0.6072,
+     "stdout_bytes": 508,
+     "stderr_bytes": 0,
+     "rc": 0
+    },
+    {
+     "args": "info",
+     "wall_s": 0.5917,
+     "stdout_bytes": 508,
+     "stderr_bytes": 0,
+     "rc": 0
+    },
+    {
+     "args": "info",
+     "wall_s": 0.6337,
+     "stdout_bytes": 508,
+     "stderr_bytes": 0,
+     "rc": 0
+    },
+    {
+     "args": "info",
+     "wall_s": 0.583,
+     "stdout_bytes": 508,
+     "stderr_bytes": 0,
+     "rc": 0
+    },
+    {
+     "args": "info",
+     "wall_s": 0.5879,
+     "stdout_bytes": 508,
+     "stderr_bytes": 0,
+     "rc": 0
+    },
+    {
+     "args": "info",
+     "wall_s": 0.5946,
+     "stdout_bytes": 508,
+     "stderr_bytes": 0,
+     "rc": 0
+    }
+   ],
+   "derived": {
+    "keepalive_median_s": 0.1694,
+    "fresh_tls_median_s": 0.3401,
+    "cli_startup_median_s": 0.0669,
+    "cli_full_median_s": 0.5952,
+    "cli_fixed_overhead_s": 0.4258
+   }
+  },
+  "S2_orientation": {
+   "notes": "fresh-agent boot cost",
+   "calls": 5,
+   "cli_calls": 0,
+   "req_bytes": 185,
+   "wire_bytes": 14176,
+   "decoded_bytes": 38993,
+   "est_tokens": 9748,
+   "cli_output_bytes": 0,
+   "wall_s": 0.849,
+   "call_log": [
+    {
+     "method": "GET",
+     "path": "/info",
+     "req_bytes": 0,
+     "wire_bytes": 417,
+     "decoded_bytes": 417,
+     "gzip": false,
+     "dur_s": 0.1686,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/tree",
+     "req_bytes": 72,
+     "wire_bytes": 1117,
+     "decoded_bytes": 8259,
+     "gzip": true,
+     "dur_s": 0.1695,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/read",
+     "req_bytes": 56,
+     "wire_bytes": 3209,
+     "decoded_bytes": 6888,
+     "gzip": true,
+     "dur_s": 0.1703,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/read",
+     "req_bytes": 55,
+     "wire_bytes": 8911,
+     "decoded_bytes": 19933,
+     "gzip": true,
+     "dur_s": 0.1701,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/session/status",
+     "req_bytes": 2,
+     "wire_bytes": 522,
+     "decoded_bytes": 3496,
+     "gzip": true,
+     "dur_s": 0.1698,
+     "status": 200
+    }
+   ],
+   "cli_log": [],
+   "derived": {
+    "context_cost_est_tokens": 9748
+   },
+   "median_wall_s": 0.911
+  },
+  "S3_search": {
+   "notes": "search vs read-everything",
+   "calls": 2,
+   "cli_calls": 0,
+   "req_bytes": 204,
+   "wire_bytes": 1546,
+   "decoded_bytes": 9585,
+   "est_tokens": 2396,
+   "cli_output_bytes": 0,
+   "wall_s": 0.36,
+   "call_log": [
+    {
+     "method": "POST",
+     "path": "/search",
+     "req_bytes": 132,
+     "wire_bytes": 429,
+     "decoded_bytes": 1326,
+     "gzip": true,
+     "dur_s": 0.182,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/tree",
+     "req_bytes": 72,
+     "wire_bytes": 1117,
+     "decoded_bytes": 8259,
+     "gzip": true,
+     "dur_s": 0.1776,
+     "status": 200
+    }
+   ],
+   "cli_log": [],
+   "derived": {
+    "search_resp_bytes": 1326,
+    "naive_read_all_py_bytes": 782326,
+    "naive_vs_search": 590.0
+   },
+   "median_wall_s": 0.4
+  },
+  "S4_stat_batch": {
+   "notes": "21 stats sequential vs batch",
+   "calls": 23,
+   "cli_calls": 1,
+   "req_bytes": 3101,
+   "wire_bytes": 5438,
+   "decoded_bytes": 16329,
+   "est_tokens": 4430,
+   "cli_output_bytes": 1395,
+   "wall_s": 4.729,
+   "call_log": [
+    {
+     "method": "POST",
+     "path": "/tree",
+     "req_bytes": 72,
+     "wire_bytes": 1117,
+     "decoded_bytes": 8259,
+     "gzip": true,
+     "dur_s": 0.2179,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 63,
+     "wire_bytes": 168,
+     "decoded_bytes": 168,
+     "gzip": false,
+     "dur_s": 0.176,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 58,
+     "wire_bytes": 173,
+     "decoded_bytes": 173,
+     "gzip": false,
+     "dur_s": 0.1775,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 64,
+     "wire_bytes": 171,
+     "decoded_bytes": 171,
+     "gzip": false,
+     "dur_s": 0.2165,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 64,
+     "wire_bytes": 177,
+     "decoded_bytes": 177,
+     "gzip": false,
+     "dur_s": 0.1767,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 60,
+     "wire_bytes": 167,
+     "decoded_bytes": 167,
+     "gzip": false,
+     "dur_s": 0.1683,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 61,
+     "wire_bytes": 173,
+     "decoded_bytes": 173,
+     "gzip": false,
+     "dur_s": 0.2018,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 61,
+     "wire_bytes": 169,
+     "decoded_bytes": 169,
+     "gzip": false,
+     "dur_s": 0.161,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 60,
+     "wire_bytes": 174,
+     "decoded_bytes": 174,
+     "gzip": false,
+     "dur_s": 0.1621,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 62,
+     "wire_bytes": 170,
+     "decoded_bytes": 170,
+     "gzip": false,
+     "dur_s": 0.2035,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 61,
+     "wire_bytes": 175,
+     "decoded_bytes": 175,
+     "gzip": false,
+     "dur_s": 0.1619,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 61,
+     "wire_bytes": 175,
+     "decoded_bytes": 175,
+     "gzip": false,
+     "dur_s": 0.1637,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 63,
+     "wire_bytes": 170,
+     "decoded_bytes": 170,
+     "gzip": false,
+     "dur_s": 0.202,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 60,
+     "wire_bytes": 168,
+     "decoded_bytes": 168,
+     "gzip": false,
+     "dur_s": 0.1619,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 62,
+     "wire_bytes": 168,
+     "decoded_bytes": 168,
+     "gzip": false,
+     "dur_s": 0.161,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 71,
+     "wire_bytes": 183,
+     "decoded_bytes": 183,
+     "gzip": false,
+     "dur_s": 0.2018,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 63,
+     "wire_bytes": 170,
+     "decoded_bytes": 170,
+     "gzip": false,
+     "dur_s": 0.1607,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 64,
+     "wire_bytes": 172,
+     "decoded_bytes": 172,
+     "gzip": false,
+     "dur_s": 0.1609,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 77,
+     "wire_bytes": 184,
+     "decoded_bytes": 184,
+     "gzip": false,
+     "dur_s": 0.202,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 66,
+     "wire_bytes": 173,
+     "decoded_bytes": 173,
+     "gzip": false,
+     "dur_s": 0.1629,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 67,
+     "wire_bytes": 174,
+     "decoded_bytes": 174,
+     "gzip": false,
+     "dur_s": 0.1622,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 74,
+     "wire_bytes": 181,
+     "decoded_bytes": 181,
+     "gzip": false,
+     "dur_s": 0.2016,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/batch",
+     "req_bytes": 1687,
+     "wire_bytes": 686,
+     "decoded_bytes": 4435,
+     "gzip": true,
+     "dur_s": 0.1639,
+     "status": 200
+    }
+   ],
+   "cli_log": [
+    {
+     "args": "batch --ops [{\"op\": \"stat\", \"path\": \"/mnt/Tera/Process/llmac",
+     "wall_s": 0.5989,
+     "stdout_bytes": 1395,
+     "stderr_bytes": 0,
+     "rc": 0
+    }
+   ],
+   "derived": {
+    "sequential_wall_s": 3.762,
+    "batch_wall_s": 0.2016,
+    "speedup": 18.7,
+    "cli_batch_wall_s": 0.5989
+   }
+  },
+  "S5_deploy": {
+   "notes": "N-file deploy: naive loop vs llmac deploy (A1)",
+   "calls": 4,
+   "cli_calls": 1,
+   "req_bytes": 246394,
+   "wire_bytes": 701,
+   "decoded_bytes": 1066,
+   "est_tokens": 339,
+   "cli_output_bytes": 295,
+   "wall_s": 1.964,
+   "call_log": [
+    {
+     "method": "POST",
+     "path": "/write",
+     "req_bytes": 122472,
+     "wire_bytes": 125,
+     "decoded_bytes": 125,
+     "gzip": false,
+     "dur_s": 0.4064,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/write",
+     "req_bytes": 103602,
+     "wire_bytes": 119,
+     "decoded_bytes": 119,
+     "gzip": false,
+     "dur_s": 0.164,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/write",
+     "req_bytes": 20098,
+     "wire_bytes": 120,
+     "decoded_bytes": 120,
+     "gzip": false,
+     "dur_s": 0.2033,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/exec",
+     "req_bytes": 222,
+     "wire_bytes": 337,
+     "decoded_bytes": 702,
+     "gzip": true,
+     "dur_s": 0.167,
+     "status": 200
+    }
+   ],
+   "cli_log": [
+    {
+     "args": "deploy --pairs work249/core/api.py=/mnt/Tera/Process/llmac-w",
+     "wall_s": 1.0214,
+     "stdout_bytes": 295,
+     "stderr_bytes": 0,
+     "rc": 0
+    }
+   ],
+   "derived": {
+    "naive_wall_s": 0.941,
+    "naive_calls": 4,
+    "llmac_deploy_wall_s": 1.0214,
+    "llmac_deploy_rc": 0,
+    "llmac_deploy_median_s": 1.007
+   }
+  },
+  "S6_edit_cas": {
+   "notes": "edit loop incl. one version-conflict recovery",
+   "calls": 7,
+   "cli_calls": 0,
+   "req_bytes": 759,
+   "wire_bytes": 1124,
+   "decoded_bytes": 1124,
+   "est_tokens": 281,
+   "cli_output_bytes": 0,
+   "wall_s": 1.216,
+   "call_log": [
+    {
+     "method": "POST",
+     "path": "/mkdir",
+     "req_bytes": 56,
+     "wire_bytes": 73,
+     "decoded_bytes": 73,
+     "gzip": false,
+     "dur_s": 0.1619,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/write",
+     "req_bytes": 99,
+     "wire_bytes": 111,
+     "decoded_bytes": 111,
+     "gzip": false,
+     "dur_s": 0.1626,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/read",
+     "req_bytes": 64,
+     "wire_bytes": 203,
+     "decoded_bytes": 203,
+     "gzip": false,
+     "dur_s": 0.2023,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/edit",
+     "req_bytes": 156,
+     "wire_bytes": 201,
+     "decoded_bytes": 201,
+     "gzip": false,
+     "dur_s": 0.1611,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/edit",
+     "req_bytes": 162,
+     "wire_bytes": 122,
+     "decoded_bytes": 122,
+     "gzip": false,
+     "dur_s": 0.1627,
+     "status": 409
+    },
+    {
+     "method": "POST",
+     "path": "/read",
+     "req_bytes": 64,
+     "wire_bytes": 210,
+     "decoded_bytes": 210,
+     "gzip": false,
+     "dur_s": 0.2024,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/edit",
+     "req_bytes": 158,
+     "wire_bytes": 204,
+     "decoded_bytes": 204,
+     "gzip": false,
+     "dur_s": 0.1625,
+     "status": 200
+    }
+   ],
+   "cli_log": [],
+   "derived": {
+    "stale_edit_status": 409,
+    "statuses": [
+     200,
+     200,
+     200,
+     200,
+     409,
+     200,
+     200
+    ]
+   },
+   "median_wall_s": 1.217
+  },
+  "S7_big_read": {
+   "notes": "whole vs ranged vs smart read (A4)",
+   "calls": 3,
+   "cli_calls": 2,
+   "req_bytes": 219,
+   "wire_bytes": 33193,
+   "decoded_bytes": 133552,
+   "est_tokens": 65126,
+   "cli_output_bytes": 126954,
+   "wall_s": 1.814,
+   "call_log": [
+    {
+     "method": "POST",
+     "path": "/tree",
+     "req_bytes": 72,
+     "wire_bytes": 1185,
+     "decoded_bytes": 9015,
+     "gzip": true,
+     "dur_s": 0.162,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/read",
+     "req_bytes": 58,
+     "wire_bytes": 30855,
+     "decoded_bytes": 122378,
+     "gzip": true,
+     "dur_s": 0.1635,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/read",
+     "req_bytes": 89,
+     "wire_bytes": 1153,
+     "decoded_bytes": 2159,
+     "gzip": true,
+     "dur_s": 0.2027,
+     "status": 200
+    }
+   ],
+   "cli_log": [
+    {
+     "args": "read --path /mnt/Tera/Process/llmac-work/llmac/core/api.py",
+     "wall_s": 0.0,
+     "stdout_bytes": 10702,
+     "stderr_bytes": 145,
+     "rc": 0
+    },
+    {
+     "args": "read --path /mnt/Tera/Process/llmac-work/llmac/core/api.py --raw",
+     "wall_s": 0.0,
+     "stdout_bytes": 116107,
+     "stderr_bytes": 0,
+     "rc": 0
+    }
+   ],
+   "derived": {
+    "file_path": "/mnt/Tera/Process/llmac-work/llmac/core/api.py",
+    "file_bytes": 116107,
+    "whole_read_resp_bytes": 122378,
+    "ranged_read_resp_bytes": 2159,
+    "smart_read_stdout_bytes": 10702,
+    "smart_read_truncated": true,
+    "raw_stdout_bytes": 116107,
+    "waste_ratio_x": 56.7
+   }
+  },
+  "S8_transfer": {
+   "notes": "big file: /read base64 vs stat --hash vs CLI download",
+   "calls": 2,
+   "cli_calls": 1,
+   "req_bytes": 156,
+   "wire_bytes": 31131,
+   "decoded_bytes": 122656,
+   "est_tokens": 30675,
+   "cli_output_bytes": 46,
+   "wall_s": 0.989,
+   "call_log": [
+    {
+     "method": "POST",
+     "path": "/read",
+     "req_bytes": 71,
+     "wire_bytes": 30866,
+     "decoded_bytes": 122391,
+     "gzip": true,
+     "dur_s": 0.1639,
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/stat",
+     "req_bytes": 85,
+     "wire_bytes": 265,
+     "decoded_bytes": 265,
+     "gzip": false,
+     "dur_s": 0.1613,
+     "status": 200
+    }
+   ],
+   "cli_log": [
+    {
+     "args": "download --path /mnt/Tera/Process/llmac-work/llmac/bench-dep",
+     "wall_s": 0.662,
+     "stdout_bytes": 46,
+     "stderr_bytes": 0,
+     "rc": 0
+    }
+   ],
+   "derived": {
+    "file_path": "/mnt/Tera/Process/llmac-work/llmac/bench-deploy/core/api.py",
+    "file_bytes": 116107,
+    "read_wire_bytes": 30866,
+    "read_decoded_bytes": 122391,
+    "stat_hash_resp_bytes": 265,
+    "cli_download_wall_s": 0.662,
+    "sha_match": true
+   },
+   "median_wall_s": 0.327
+  },
+  "S9_long_exec": {
+   "notes": "20s command through exec",
+   "calls": 1,
+   "cli_calls": 0,
+   "req_bytes": 68,
+   "wire_bytes": 187,
+   "decoded_bytes": 187,
+   "est_tokens": 46,
+   "cli_output_bytes": 0,
+   "wall_s": 20.249,
+   "call_log": [
+    {
+     "method": "POST",
+     "path": "/exec",
+     "req_bytes": 68,
+     "wire_bytes": 187,
+     "decoded_bytes": 187,
+     "gzip": false,
+     "dur_s": 20.2491,
+     "status": 200
+    }
+   ],
+   "cli_log": []
+  }
+ }
+}
