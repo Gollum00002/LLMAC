@@ -34,7 +34,7 @@ import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(_HERE)
-CLI = os.path.join(_REPO_ROOT, "cli.py")
+CLI = os.path.join(_REPO_ROOT, "llmac.py")
 
 
 def _load_cli():

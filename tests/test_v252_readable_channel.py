@@ -39,7 +39,7 @@ from core.state import make_default_agent
 
 from core.constants import LLMAC_VERSION
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 GUI_SRC = os.path.join(_PARENT, "gui.py")
 API_SRC = os.path.join(_PARENT, "core", "api.py")
 BENCH_SRC = os.path.join(_PARENT, "tools", "bench_llmac.py")

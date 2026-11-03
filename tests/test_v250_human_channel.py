@@ -10,7 +10,7 @@ Covers the release items:
     the GUI sidebar renders (the GUI itself is pinned as source markers
     per the test_v246 pattern; live acceptance is the user's eyeball).
   * ASK-003 version truth — LLMAC_VERSION == 2.5.0 in BOTH copies
-    (core/constants.py + the cli.py standalone bootstrap fallback) and
+    (core/constants.py + the llmac.py standalone bootstrap fallback) and
     GET /info reporting it.
   * batch-rc transport-only contract (decision closed Task 35) — op
     failures print their full context, rc stays 0; pinned so it can
@@ -35,7 +35,7 @@ from core.constants import LLMAC_VERSION, SESSION_INBOX_CAP
 from core.events import EventBus
 from core.sessions import SessionRegistry
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 GUI_SRC = os.path.join(_PARENT, "gui.py")
 EVENTS_SRC = os.path.join(_PARENT, "core", "events.py")
 

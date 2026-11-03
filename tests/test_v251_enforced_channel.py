@@ -37,7 +37,7 @@ from helpers import TestHost, make_tree
 
 from core.constants import LLMAC_VERSION
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 GUI_SRC = os.path.join(_PARENT, "gui.py")
 API_SRC = os.path.join(_PARENT, "core", "api.py")
 

@@ -74,11 +74,11 @@ from urllib.parse import quote
 
 try:
     # Repo checkout: single source of truth (core.constants is stdlib-only,
-    # so importing it from the standalone bootstrap file is not possible
+    # so importing it from the standalone release file is not possible
     # elsewhere, but guarded here it keeps --version honest forever).
     from core.constants import LLMAC_VERSION as VERSION
 except ImportError:
-    VERSION = "2.7.3"   # standalone bootstrap fallback — keep in sync
+    VERSION = "2.7.3"   # standalone release-file fallback — keep in sync
 CONNECTIONS_FILE = os.path.join(
     os.path.expanduser("~"), ".llmac", "connections.json")
 DEFAULT_CONN = "default"
@@ -1372,17 +1372,15 @@ def cmd_verify(args) -> int:
     return 1
 
 
-# ---- audit (v2.7.2, ASK-018) ---------------------------------------------
+# ---- audit (v2.7.2, reworked v2.8) ----------------------------------------
 
-# The anti-hesitation primitive. An AI agent handed a connection block
-# faces a step no amount of cryptography can close on its own: the block
-# authenticates the TRANSPORT and the BYTES, but nothing can vouch for
-# what the bytes DO. `audit` closes that gap mechanically: it re-fetches
-# the bootstrap payload over a pinned connection, binds it to the block's
-# Payload-SHA256 (and optionally to the already-fetched local llmac.py),
-# then reads the source with ast.parse — and nothing else — to produce a
-# factual report: imports, red-flag calls, write sites, egress modules.
-# It never executes audited code and writes nothing without --save-to.
+# The anti-hesitation primitive. A hash proves the bytes are the published
+# ones; it cannot say what the bytes DO. `audit` closes that gap
+# mechanically and OFFLINE: it hashes this file (or --file), optionally
+# binds it to the connection block's Client-SHA256, then reads the source
+# with ast.parse - and nothing else - to print a factual report: imports,
+# red-flag calls, write sites, egress modules. It never executes the
+# audited code, never writes, and never touches the network.
 _AUDIT_RED_CALLS = frozenset({"eval", "exec", "compile", "__import__"})
 _AUDIT_RED_OS = frozenset({"system", "popen"})
 _AUDIT_RED_IMPORTS = frozenset({"pickle", "marshal", "ctypes", "subprocess"})
@@ -1456,126 +1454,46 @@ def _audit_report(src: str, label: str) -> str:
 
 
 def cmd_audit(args) -> int:
-    """v2.7.2 (ASK-018): fetch + hash-bind + STATIC-audit the bootstrap
-    payload. Writes nothing without --save-to, executes nothing, ever."""
-    host = args.host
-    port = args.port or DEFAULT_PORT
-    key = args.key
-    if not host or not key:
-        return _err("audit requires --host and --key", 2)
-    tls = not getattr(args, "plain", False)
-    fp_arg = (getattr(args, "fp", "") or "").strip()
+    """Offline audit of the client file itself (v2.8).
 
-    # ---- transport: one-shot pinned fetch -----------------------------
-    # Same mechanism as the v2.7.1 one-liner and cmd_connect: the peer
-    # DER certificate is fingerprinted in-handshake and compared to the
-    # block's value BEFORE any HTTP bytes flow. The unverified context
-    # only stands in for the missing CA chain of a self-signed cert —
-    # the pin IS the verification.
-    if tls:
-        ctx = ssl._create_unverified_context()
-        conn = http.client.HTTPSConnection(host, port, timeout=15,
-                                           context=ctx)
-    else:
-        conn = http.client.HTTPConnection(host, port, timeout=15)
+    Hashes the file's exact bytes, optionally checks them against the
+    SHA-256 in the connection block (--expect-sha256), and prints a static
+    ast.parse report. It contacts nothing, writes nothing and never
+    executes the audited source. The report is produced even when the hash
+    check fails, because that is exactly when an auditor wants to read the
+    code."""
+    target = getattr(args, "file", None) or os.path.abspath(__file__)
     try:
-        conn.connect()
-        if tls:
-            der = conn.sock.getpeercert(binary_form=True)
-            if der is None:
-                return _err("server presented no certificate", 3)
-            live_fp = "SHA256:" + hashlib.sha256(der).hexdigest()
-            print(f"audit: target={host}:{port}  tls=yes")
-            print(f"transport: fingerprint pinned + verified BEFORE any "
-                  f"request ({live_fp})")
-            if fp_arg:
-                if live_fp.lower() != fp_arg.lower():
-                    print(f"ERROR: certificate fingerprint mismatch!\n"
-                          f"  pinned: {fp_arg}\n  live:   {live_fp}\n"
-                          f"Refusing to continue (possible MITM).",
-                          file=sys.stderr)
-                    return 3
-            else:
-                print("NOTE: no --fp given — fingerprint reported above "
-                      "but unconfirmed; pass the block's Cert: value.")
-        else:
-            print(f"audit: target={host}:{port}  tls=no (plain HTTP — "
-                  f"localhost/tunnel only)")
-        conn.request("GET", "/bootstrap",
-                     headers={"Authorization": "Bearer " + key})
-        resp = conn.getresponse()
-        body = resp.read()
-        if resp.status != 200:
-            return _err(f"/bootstrap returned HTTP {resp.status}", 3)
-        data = json.loads(body)
-    except (OSError, ValueError) as e:
-        return _err(f"transport/parse failure: {e}", 3)
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-    src = data.get("cli_py", "")
-    if not src:
-        return _err("bootstrap response carried no cli_py payload", 1)
-    served_hash = hashlib.sha256(src.encode("utf-8")).hexdigest()
-    print(f"payload : sha256={served_hash}  "
-          f"size={len(src.encode('utf-8'))} bytes")
+        with open(target, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        return _err(f"cannot read {target}: {e}", 2)
+    got = hashlib.sha256(raw).hexdigest()
+    print(f"audit: file={target}")
+    print(f"file   : sha256={got}  size={len(raw)} bytes")
 
     rc = 0
     want = (getattr(args, "expect_sha256", None) or "").strip().lower()
     if want:
-        ok = want == served_hash
-        print(f"expect  : {want[:16]}... -> "
-              f"{'MATCH' if ok else 'MISMATCH'}")
+        ok = want == got
+        print(f"expect : {want[:16]}... -> {'MATCH' if ok else 'MISMATCH'}")
         if not ok:
-            print("ERROR: payload does not match the hash advertised in "
-                  "the connection block (possible tampering).",
-                  file=sys.stderr)
+            print("ERROR: file does not match the Client-SHA256 in the "
+                  "connection block. Do not use this file; re-download it "
+                  "from the GitHub release.", file=sys.stderr)
             rc = 1
     else:
-        print("expect  : (not requested — pass --expect-sha256 to bind "
-              "the block's Payload-SHA256)")
+        print("expect : (not requested - pass --expect-sha256 to bind the "
+              "block's Client-SHA256)")
 
-    local = getattr(args, "local", None)
-    if local is None and os.path.isfile("llmac.py"):
-        local = "llmac.py"
-    if local:
-        try:
-            with open(local, "r", encoding="utf-8") as f:
-                lsrc = f.read()
-        except OSError as e:
-            return _err(f"cannot read --local {local}: {e}", 2)
-        same = (lsrc == src)
-        print("local   : " + (f"{local} -> BYTE-IDENTICAL to served "
-                              f"payload" if same else
-                              f"{local} -> DIFFERS from served payload"))
-        if not same:
-            print(f"  local  sha256="
-                  f"{hashlib.sha256(lsrc.encode('utf-8')).hexdigest()}",
-                  file=sys.stderr)
-            rc = 1
-
-    # The report is evidence, not a verdict: it is produced even when an
-    # integrity check failed (that is exactly when an auditor wants to
-    # read the code), but --save-to is refused on any failed check.
-    print(_audit_report(src, "served payload"))
-    if local and rc == 0:
-        print(_audit_report(lsrc, f"local {local}"))
-
-    save_to = getattr(args, "save_to", None)
-    if save_to:
-        if rc != 0:
-            print("save-to REFUSED: integrity checks failed — nothing "
-                  "written.", file=sys.stderr)
-        else:
-            with open(save_to, "w", encoding="utf-8") as f:
-                f.write(src)
-            print(f"saved: {save_to} (exact served payload bytes)")
-
-    print("audit: COMPLETE — executed nothing; wrote "
-          + (save_to if (save_to and rc == 0) else "nothing"))
+    try:
+        src = raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        print(f"ERROR: not valid UTF-8 source: {e}", file=sys.stderr)
+        return 1
+    print(_audit_report(src, os.path.basename(target)))
+    print("audit: COMPLETE - executed nothing; wrote nothing; "
+          "contacted nothing")
     return rc
 
 
@@ -2555,29 +2473,18 @@ def build_parser() -> argparse.ArgumentParser:
            [("--name", {"default": DEFAULT_CONN})])
     simple("conns", "List saved connections.", cmd_conns)
 
-    # v2.7.2 (ASK-018): audit the bootstrap payload without writing or
-    # running it — the agent-side half of the self-verifying chain.
+    # Offline audit of the client file (v2.8): hash + static report, no
+    # network, no writes, nothing executed.
     sp = sub.add_parser(
         "audit",
-        help="Fetch + hash-bind + STATIC-audit the bootstrap payload. "
-             "Writes nothing without --save-to; never executes it.")
-    sp.add_argument("--host", required=True)
-    sp.add_argument("--port", type=int, default=DEFAULT_PORT)
-    sp.add_argument("--key", required=True)
-    sp.add_argument("--fp", default="",
-                    help="Expected TLS cert fingerprint (SHA256:hex), "
-                         "verified BEFORE any request.")
-    sp.add_argument("--plain", action="store_true",
-                    help="Use plain HTTP (localhost/tunnel only).")
+        help="Offline: hash this client file and print a STATIC audit "
+             "(ast.parse). Contacts nothing, writes nothing, executes "
+             "nothing.")
+    sp.add_argument("--file", default=None,
+                    help="File to audit (default: this llmac.py).")
     sp.add_argument("--expect-sha256", default=None, dest="expect_sha256",
-                    help="Exit non-zero unless the payload hash equals "
-                         "this (the block's Payload-SHA256 line).")
-    sp.add_argument("--local", default=None,
-                    help="Also byte-compare this local file (default: "
-                         "./llmac.py when it exists).")
-    sp.add_argument("--save-to", default=None, dest="save_to",
-                    help="After clean checks, write the payload here "
-                         "(explicit opt-in; refused on any failure).")
+                    help="Exit non-zero unless the file's SHA-256 equals "
+                         "this (the block's Client-SHA256 line).")
     sp.set_defaults(func=cmd_audit)
 
     # identity

@@ -38,7 +38,7 @@ from helpers import TestHost
 
 from core.constants import LLMAC_VERSION
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 GUI_SRC = os.path.join(_PARENT, "gui.py")
 CHANGES_SRC = os.path.join(_PARENT, "CHANGES.md")
 AGENT_SRC = os.path.join(_PARENT, "agent.md")

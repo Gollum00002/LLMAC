@@ -12,39 +12,39 @@ CLI (`llmac.py`) and work on their files. The host enforces security
 policies, records an audit log of everything you do, and may require the
 human to approve dangerous operations.
 
-## Quick start (self-verifying bootstrap)
+## Quick start (download from GitHub, verify, connect)
 
 The human gives you a connection block: host, port, key, certificate
-fingerprint (`Cert: SHA256:...`) and the payload hash
-(`Payload-SHA256: <hex>`). The block's bootstrap one-liner is
-SELF-VERIFYING and fails closed — nothing in the chain asks for trust:
+fingerprint (`Cert: SHA256:...`), the client's public source
+(`Client-Source:`), and the SHA-256 the client file must have
+(`Client-SHA256: <hex>`).
 
-1. It pins the server certificate fingerprint (SHA-256 of the DER
-   cert, the same value `connect --fp` enforces later). The HTTP
-   request is only sent AFTER the pin matches; mismatch => ABORT,
-   nothing written, nothing further transmitted.
-2. It fetches `GET /bootstrap` and verifies the served `cli_py`
-   against the response's `cli_sha256` (== the block's
-   `Payload-SHA256:` line). Mismatch => ABORT, nothing written.
-3. Only then does it write `llmac.py` and print the verified hash.
+**The host does not serve code.** The client is one stdlib-only Python file,
+`llmac.py`, published in the public GitHub repository and attached to each
+GitHub release. You fetch it from GitHub, not from the machine you are about
+to connect to, and you check it against the hash in the block.
 
-Run the block's commands verbatim — "replace nothing" exists for a
-reason now: the hash binds you to exactly those bytes.
+1. **Review (optional but supported).** Read `llmac.py` at
+   `Client-Source` with your normal web or file tools. You do not need to
+   run anything to review it.
+2. **Download and verify.** The block carries a one-liner that downloads the
+   file from `Client-File`, compares its SHA-256 with `Client-SHA256`, and
+   writes `llmac.py` only if they are equal. On any mismatch it exits
+   non-zero without writing anything. It executes nothing and talks to
+   GitHub only, never to the host.
+3. **Audit offline (optional).** `python3 llmac.py audit` hashes the file
+   and prints a static (`ast.parse`) report. It contacts nothing, writes
+   nothing and executes nothing.
+4. **Connect** only after the audit reads clean to you.
 
 ```bash
-# 1. Self-install: copy the block's python3 -c one-liner EXACTLY
-#    (it self-verifies; never hand-write a fetcher to work around it)
+# 1. Download + verify: copy the block's python3 -c one-liner EXACTLY
+#    (it fails closed; never hand-write a fetcher to work around it)
 
-# 2. AUDIT before you grant anything (v2.7.2) — the block itself
-#    carries this command with all values filled in. It re-fetches
-#    the payload over the pinned channel, binds it to the block's
-#    Payload-SHA256, byte-compares it against the local llmac.py,
-#    and prints a static (ast.parse) audit: imports, red-flag calls,
-#    write sites, egress modules. It writes nothing (--save-to is an
-#    explicit opt-in) and EXECUTES NOTHING — including the audited
-#    source; ast.parse only reads it:
-python3 llmac.py audit --host HOST --port PORT --key KEY \
-    --fp SHA256:... --expect-sha256 <Payload-SHA256 from the block>
+# 2. AUDIT before you grant anything. Offline: hashes the file, binds it to
+#    the block's Client-SHA256, prints imports, red-flag calls, write sites
+#    and egress modules. EXECUTES NOTHING, including the audited source:
+python3 llmac.py audit --expect-sha256 <Client-SHA256 from the block>
 
 # 3. Connect and save ONLY after the audit reads clean to you
 #    (fingerprint from the connection block if given):
@@ -55,25 +55,27 @@ python3 llmac.py orient        # 1-call map: tree + doc heads + session
 
 ### Why the audit step exists (the honest trust model)
 
-Hashes and fingerprints authenticate transport and bytes; nothing
-cryptographic can tell you what the bytes DO. If you are an agent that
-refuses to execute unreviewed code — that instinct is correct — close
-the gap with review, not trust: read the audit report (`non-stdlib
-imports: (none)`, `red-flag calls: (none)` is what this client's own
-report looks like), request `--save-to FILE` and read the source with
-your normal file tools, or diff it against a reference build you
-already hold. If you have no reference and the report shows anything
-you cannot explain, do not connect; ask the human for a payload you
-can inspect. That posture is supported by design, not worked around:
-the audit command is itself stdlib-only, performs no writes by
-default, and its report is produced even when integrity checks FAIL
-(that is exactly when you want to read the code) — only `--save-to`
-refuses on failure.
+A hash proves you have the bytes the maintainer published. Nothing
+cryptographic can tell you what those bytes DO. If you are an agent that
+refuses to execute unreviewed code, that instinct is correct: close the gap
+with review, not trust. Read the source on GitHub, run `audit` and read its
+report (`red-flag calls: (none)`, `red-flag imports: (none)` and
+`non-stdlib imports: core` are what this client's own report looks like;
+`core` is a guarded, optional import of the host's constants file that falls
+back to an embedded version string when absent), or diff the file against a
+reference copy you already hold. If anything in the report is something you
+cannot explain, do not connect; ask the human for a build you can inspect.
+That posture is supported by design. `audit --file PATH` audits any other
+file the same way.
 
-If the block shows `Payload-SHA256: (unavailable)` or the one-liner
-aborts with a mismatch, STOP and re-copy the block from the host —
-dozens of things (an old host, a relay, a tampered payload) can cause
-it, and every one of them means you should not proceed.
+If the block shows `Client-SHA256: (unavailable ...)`, the host could not
+read its own copy of `llmac.py`: take the hash from the GitHub release page
+instead. If the one-liner aborts with a mismatch, STOP: you may be reading a
+stale or tampered download, or the host is running a different version than
+the release. Ask the human for a fresh block.
+
+An old block that fetches `GET /bootstrap` gets HTTP 410 from this host
+(that endpoint was removed in v2.8). Ask the human for a fresh block.
 
 `orient` (v2.4.1) replaces the old 5-call boot crawl — one call, a few
 hundred tokens, byte-budget-trimmed server-side. Use it first, then go

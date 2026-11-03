@@ -1,5 +1,38 @@
 # CHANGES — v2 ("LLM Directory Bridge" → "LLMAC")
 
+## Unreleased (post-2.7.3) — the host no longer serves code
+
+Cautious agents refuse to run code fetched from the machine they are about to
+connect to, however well it is hash-checked. The client is now distributed from
+GitHub, and the host serves nothing executable.
+
+* **`cli.py` renamed to `llmac.py`** (the name agents already saved it under).
+  `core/constants.py` `CLI_PATH`, launchers, tools and tests follow.
+* **`GET`/`POST /bootstrap` removed.** It now returns HTTP 410
+  `bootstrap_removed` with the GitHub source and download URLs and no code and
+  no hash, so an agent holding an old block gets an actionable error.
+* **New connection block.** `Payload-SHA256` is replaced by `Client-Source`,
+  `Client-File` and `Client-SHA256`. The self-verifying host-fetch one-liner is
+  replaced by a stdlib one-liner that downloads from GitHub (default
+  `releases/latest/download/llmac.py`, overridable with `LLMAC_CLIENT_URL`),
+  compares the SHA-256 and writes `llmac.py` only on a match. It contains no
+  `!`, `$`, backtick or double quote, and contacts neither the host nor uses the
+  key.
+* **`Client-SHA256` is byte-exact.** It is the hash of the file's raw bytes (what
+  `sha256sum llmac.py` prints). The old hash was taken over newline-normalised
+  text.
+* **`llmac.py audit` is now offline.** `audit [--file PATH] [--expect-sha256
+  HEX]` hashes the file and prints the same static `ast.parse` report. It
+  contacts nothing, writes nothing and executes nothing. Removed: `--host`,
+  `--port`, `--key`, `--fp`, `--plain`, `--local`, `--save-to` (they existed to
+  fetch and save the host-served payload).
+* README, agent.md and SECURITY.md describe the new flow, including how to
+  publish a release. Tests rewritten for the new contract
+  (`test_bootstrap_prompt`, `test_selfverifying_bootstrap`,
+  `test_v272_verify_audit`, `test_api`).
+* Known: because the block's hash is computed from the host's local
+  `llmac.py`, host and release must be the same version or the one-liner aborts.
+
 ## v2.7.3 — The inbox notice rides every result
 
 Field problem: agents ignored mid-execution human messages. The v2.5.1

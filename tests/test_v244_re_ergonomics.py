@@ -44,7 +44,7 @@ class TestStaleConnectionHint(unittest.TestCase):
     def _client(self, reused: bool):
         import importlib.util
         spec = importlib.util.spec_from_file_location(
-            "llmac_cli_v244", os.path.join(_PARENT, "cli.py"))
+            "llmac_cli_v244", os.path.join(_PARENT, "llmac.py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         c = mod.Client("127.0.0.1", 8765, "k", tls=False)
@@ -254,13 +254,13 @@ class TestSessionExport(unittest.TestCase):
         import importlib.util
         import subprocess
         spec = importlib.util.spec_from_file_location(
-            "llmac_cli_v244_exp", os.path.join(_PARENT, "cli.py"))
+            "llmac_cli_v244_exp", os.path.join(_PARENT, "llmac.py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         outdir = tempfile.mkdtemp(prefix="v244-export-")
         outfile = os.path.join(outdir, "notes.json")
         r = subprocess.run(
-            [sys.executable, os.path.join(_PARENT, "cli.py"),
+            [sys.executable, os.path.join(_PARENT, "llmac.py"),
              "--plain", "--host", "127.0.0.1",
              "--port", str(self.host.port), "--key", self.host.key,
              "--no-verify", "session", "export", "--out", outfile],

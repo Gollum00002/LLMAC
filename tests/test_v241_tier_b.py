@@ -37,7 +37,7 @@ for _p in (_PARENT, _THIS):
 
 from helpers import TestHost
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 
 
 def run_cli(host, *args, timeout=90):

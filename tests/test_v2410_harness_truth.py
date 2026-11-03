@@ -34,7 +34,7 @@ for _p in (_PARENT, _THIS):
 
 from helpers import TestHost, make_tree
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 CMP = os.path.join(_PARENT, "scripts", "compare_bench.py")
 BENCH = os.path.join(_PARENT, "tools", "bench_llmac.py")
 
@@ -189,7 +189,7 @@ class TestBenchBigFileIndices(unittest.TestCase):
         })
         self.repo = self.host.root
         self.api = os.path.join(self.host.root, "core", "api.py")
-        # the bench's in-scenario cli.py subprocess reads read the
+        # the bench's in-scenario llmac.py subprocess reads read the
         # connection from LLMAC_* env vars, exactly like the CLI
         self._env = {k: os.environ.get(k) for k in
                      ("LLMAC_HOST", "LLMAC_PORT", "LLMAC_KEY")}
@@ -243,7 +243,7 @@ class TestBenchBigFileIndices(unittest.TestCase):
                              f"{k}: {walk['derived'][k]!r} vs "
                              f"{pinned['derived'][k]!r}")
         # NOTE: the CLI download leg cannot run against a plain-HTTP
-        # TestHost (cli.py env-override defaults to TLS; the real bench
+        # TestHost (llmac.py env-override defaults to TLS; the real bench
         # runs pinned-TLS and the live gate pins sha_match True on S8).
         # Here sha_match must merely be IDENTICAL across the two modes.
         self.assertEqual(walk["derived"]["sha_match"],

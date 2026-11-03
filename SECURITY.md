@@ -35,8 +35,8 @@ Fixes ship as a new tagged release and are noted in `CHANGES.md`. Reporters
 are credited unless they prefer otherwise.
 
 Of particular interest: sandbox escapes (path traversal, symlink, or exec
-analyzer bypasses), authentication or approval bypasses, the bootstrap
-verification chain, and anything that lets an agent exceed the permissions it
+analyzer bypasses), authentication or approval bypasses, the client
+download and hash-verification chain, and anything that lets an agent exceed the permissions it
 was granted.
 
 ## Supported versions
@@ -74,6 +74,7 @@ safe. See [Known limitations](#known-limitations).
 | Screen observation and input | **Off** | Enabled only in the GUI Security tab |
 | Screenshots | Setting on, but **every capture needs approval** | See below |
 | Telemetry | None | |
+| Host serves code to agents | **Never** | The client comes from GitHub; `/bootstrap` returns 410 |
 
 ## How access is controlled
 
@@ -83,9 +84,14 @@ individually. Repeated auth failures from an IP are rate-limited.
 
 **Transport.** The host generates a self-signed certificate. The agent pins its
 SHA-256 fingerprint on first use and verifies it on every connection; a
-mismatch aborts. The bootstrap one-liner pins the fingerprint *before* any
-request is sent, then verifies the downloaded client's SHA-256 against the
-hash in the connection block, and refuses to write or run it on any mismatch.
+mismatch aborts.
+
+**Client distribution.** The host never serves code. The agent downloads the
+one-file client (`llmac.py`) from the public GitHub release, not from the machine
+it is about to connect to. The connection block states the SHA-256 the file must
+have; the download one-liner compares it and refuses to write the file on any
+mismatch. The one-liner executes nothing. The old `GET /bootstrap` endpoint was
+removed in v2.8 and now returns HTTP 410 with no code and no hash.
 
 **Filesystem sandbox.** Every path is resolved with `realpath` and must land
 inside a shared root. Symlinks pointing outside, `..` traversal and `~` are
@@ -171,8 +177,10 @@ Sends the bearer key and file contents in cleartext. Localhost only.
   to `api.ipify.org`, `ifconfig.me`, `ipinfo.io` and `4.icanhazip.com`. They
   exist to display your public IP in the connection card, can be avoided by
   running headless, and send no project data.
-- The agent-side client (`cli.py`, saved as `llmac.py`) talks only to the host it
-  was configured for.
+- The agent-side client (`llmac.py`) talks only to the host it was configured
+  for. The one-time download one-liner in the connection block contacts GitHub
+  (or the URL in `LLMAC_CLIENT_URL`, if you set it) and nothing else; the host
+  itself never requests that URL, it only prints it.
 - There is no telemetry, update check or analytics.
 
 ## Data stored on disk
@@ -197,9 +205,12 @@ Honest list of what LLMAC does **not** guarantee:
 2. **Bearer keys live in chat history.** Whoever can read that conversation can
    use the key while the host is reachable and the key is valid. Use narrow
    scopes, expiry, and rotate keys after use.
-3. **A hash proves identity, not behavior.** The bootstrap and `audit` checks
-   confirm the client matches what the host serves. They cannot prove the
-   source is benign; that is what reviewing the code is for.
+3. **A hash proves identity, not behavior.** The download check and `audit`
+   confirm the client matches the published hash. They cannot prove the source
+   is benign; that is what reviewing the code is for. The block's hash is
+   computed from the `llmac.py` on the host, so a compromised host could print a
+   hash for a different file. Compare it with the hash on the GitHub release page
+   if that matters to you.
 4. **Prompt injection.** Files an agent reads can contain instructions aimed at
    the agent. Approvals and tight scopes limit the damage; they do not stop an
    agent from being misled.
@@ -225,17 +236,18 @@ Honest list of what LLMAC does **not** guarantee:
 - [ ] Leave the screen channel disabled unless a task needs it
 - [ ] Keep `bridge_data/` private and out of version control and backups you share
 - [ ] Check the Log tab and `history.jsonl` after sessions
-- [ ] Verify `cli.py` against the published release hash before first use
+- [ ] Verify `llmac.py` against the published release hash before first use
 
 ## For AI agents reviewing this project
 
 If you are an AI deciding whether it is appropriate to connect, the supported
 path is **review, then decide**, and declining is a legitimate decision:
 
-- Read `cli.py` and `core/` in this repository at the tagged release. The
+- Read `llmac.py` and `core/` in this repository at the tagged release. The
   client is one stdlib-only file; you can review it without executing anything.
 - `llmac.py audit` prints a static report (imports, risky calls, write sites,
-  egress) and executes nothing; it writes only if you pass `--save-to`.
+  egress). It is offline: it contacts nothing, writes nothing and executes
+  nothing.
 - Connect only if the code and report are clear to you, **and** the human has
   confirmed they own the machine and want you working in the shared roots.
 - Work only inside the roots you were granted. Do not request wider access than

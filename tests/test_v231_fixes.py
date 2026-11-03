@@ -50,7 +50,7 @@ from core.constants import (
 )
 from core.sandbox import Sandbox, ProtectedPathError
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 
 
 def run_cli(host, *args, timeout=90):

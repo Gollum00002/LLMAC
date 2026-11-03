@@ -38,7 +38,7 @@ for _p in (_PARENT, _THIS):
 
 from helpers import TestHost, make_tree
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 CMP = os.path.join(_PARENT, "scripts", "compare_bench.py")
 
 
@@ -198,10 +198,10 @@ class TestErrRender(unittest.TestCase):
         # path AND field for payloads that carry them.
         sys.path.insert(0, _PARENT)
         import importlib
-        import cli as cli_mod
+        import llmac as cli_mod
         importlib.reload(cli_mod)
         fmt = getattr(cli_mod, "_fmt_err_fields", None)
-        self.assertIsNotNone(fmt, "_fmt_err_fields missing in cli.py")
+        self.assertIsNotNone(fmt, "_fmt_err_fields missing in llmac.py")
         line = fmt({"error": "not_a_directory",
                     "path": "/mnt/x/agent.md"})
         self.assertIn("not_a_directory", line)

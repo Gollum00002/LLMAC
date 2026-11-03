@@ -27,7 +27,7 @@ for _p in (_PARENT, _THIS):
 
 from helpers import TestHost, make_tree
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 NEEDLE = "waiting to be addressed in Inbox"
 
 

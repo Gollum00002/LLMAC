@@ -52,6 +52,6 @@ if [ "$HEADLESS" = false ]; then
     fi
 fi
 
-# --- Check if cli.py's deps are all stdlib (they are, but verify) ---
+# --- Check if llmac.py's deps are all stdlib (they are, but verify) ---
 echo "[run.sh] Launching host ..."
 exec "$PYTHON" host.py "$@"

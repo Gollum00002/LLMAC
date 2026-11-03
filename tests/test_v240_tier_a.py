@@ -30,7 +30,7 @@ for _p in (_PARENT, _THIS):
 from helpers import TestHost
 from core.sandbox import Sandbox
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 
 
 def run_cli(host, *args, timeout=90, cwd=None):
@@ -41,7 +41,7 @@ def run_cli(host, *args, timeout=90, cwd=None):
 
 
 def load_cli_module():
-    """Import cli.py as a module for unit-testing pure functions."""
+    """Import llmac.py as a module for unit-testing pure functions."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("llmac_cli_test", CLI)
     mod = importlib.util.module_from_spec(spec)

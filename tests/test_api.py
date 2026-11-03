@@ -17,7 +17,7 @@ from helpers import TestHost, make_tree
 from core.state import make_default_agent, normalize_agent
 
 CLI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                   "cli.py")
+                   "llmac.py")
 
 
 class TestAuth(unittest.TestCase):
@@ -398,11 +398,14 @@ class TestBootstrapAndBodyCaps(unittest.TestCase):
     def tearDown(self):
         self.host.stop()
 
-    def test_bootstrap_serves_cli(self):
+    def test_bootstrap_no_longer_serves_code(self):
+        # v2.8: the host never serves the client; it points at GitHub.
         resp, status = self.host.get("/bootstrap")
-        self.assertEqual(status, 200)
-        self.assertIn("def main", resp["cli_py"])
-        self.assertEqual(resp["name"], "llmac.py")
+        self.assertEqual(status, 410)
+        self.assertEqual(resp["error"], "bootstrap_removed")
+        self.assertNotIn("cli_py", resp)
+        self.assertNotIn("def main", repr(resp))
+        self.assertIn("github.com", resp["download"])
 
     def test_body_too_large(self):
         resp, status = self.host.post("/write", {
@@ -412,7 +415,7 @@ class TestBootstrapAndBodyCaps(unittest.TestCase):
 
 
 class TestCliEndToEnd(unittest.TestCase):
-    """Drive cli.py as a subprocess against a live host (plain HTTP)."""
+    """Drive llmac.py as a subprocess against a live host (plain HTTP)."""
 
     def setUp(self):
         self.host = TestHost()
@@ -473,7 +476,7 @@ class TestCliEndToEnd(unittest.TestCase):
         # ~/.llmac/connections.json (an isolation bug here once wiped a
         # production connection mid-session).
         import tempfile
-        import cli as cli_mod
+        import llmac as cli_mod
         with tempfile.TemporaryDirectory() as fake_home:
             real_file = cli_mod.CONNECTIONS_FILE
             p = subprocess.run(
@@ -490,7 +493,7 @@ class TestCliEndToEnd(unittest.TestCase):
             try:
                 cli_mod.CONNECTIONS_FILE = os.path.join(
                     fake_home, ".llmac", "connections.json")
-                from cli import Conns
+                from llmac import Conns
                 saved = Conns.get(self.conn)
                 self.assertIsNotNone(saved)
                 self.assertEqual(saved["port"], self.host.port)

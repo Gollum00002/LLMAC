@@ -30,7 +30,7 @@ from core.constants import GZIP_MIN_BYTES
 from core.sandbox import Sandbox
 from core.state import StateStore, make_default_agent, default_settings
 
-CLI = os.path.join(_PARENT, "cli.py")
+CLI = os.path.join(_PARENT, "llmac.py")
 
 
 def run_cli(host, *args, timeout=90):
