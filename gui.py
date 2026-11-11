@@ -73,6 +73,7 @@ from core.screen import (
 from core.server import (
     build_context, build_prompt_text, fetch_public_ip, make_server,
 )
+from core import netinfo
 
 # ---------------------------------------------------------------------------
 # Theme — modern dark UI (v2.2)
@@ -1217,8 +1218,9 @@ class HostWindow(QMainWindow):
         grid.addWidget(QLabel("Bind host"), 0, 0)
         self.host_combo = QComboBox()
         self.host_combo.setEditable(True)
-        self.host_combo.addItems(["127.0.0.1", "0.0.0.0", "::"])
-        self.host_combo.setCurrentText(self.host_addr)
+        # v2.8: loopback, then this machine's real IPv4s (the missing
+        # middle ground between 127.0.0.1 and 0.0.0.0), then wildcards.
+        self._rebuild_host_items(preserve=self.host_addr)
         self.host_combo.currentTextChanged.connect(self._update_exposure_warning)
         grid.addWidget(self.host_combo, 0, 1)
         grid.addWidget(QLabel("Port"), 0, 2)
@@ -1229,7 +1231,15 @@ class HostWindow(QMainWindow):
         self.refresh_ip_btn = QPushButton("Refresh IP")
         self.refresh_ip_btn.clicked.connect(self._fetch_public_ip_async)
         grid.addWidget(self.refresh_ip_btn, 0, 4)
-        grid.setColumnStretch(5, 1)
+        # v2.8: re-detect local IPv4s (router/VPN changes) into the combo.
+        self.host_refresh_btn = QPushButton("\u21bb")
+        self.host_refresh_btn.setToolTip(
+            "Re-detect this machine's IPv4 addresses for the bind "
+            "dropdown (router/VPN changes)")
+        self.host_refresh_btn.setMaximumWidth(34)
+        self.host_refresh_btn.clicked.connect(self._refresh_local_ips)
+        grid.addWidget(self.host_refresh_btn, 0, 5)
+        grid.setColumnStretch(6, 1)
 
         self.tls_check = QCheckBox("TLS — self-signed cert, "
                                    "fingerprint-pinned (agents verify it)")
@@ -2012,7 +2022,19 @@ class HostWindow(QMainWindow):
         if self.public_ip is None:
             self._log("Public IP not yet known - fetching...")
             self._fetch_public_ip_async()
-        host = self.public_ip or self.host_addr
+        # v2.8: bind-scoped Host line. A specific bind (e.g. 192.168.1.50)
+        # is the operator's explicit choice of interface — the prompt must
+        # carry THAT address, not the public IP (behind NAT they differ;
+        # the agent would be pointed at the wrong interface). The public
+        # IP stays correct for the 0.0.0.0 bind-with-forwarding setup.
+        bind = (self.host_combo.currentText().strip()
+                if hasattr(self, "host_combo") else self.host_addr)
+        if netinfo.bind_scope(bind) == "specific":
+            host = bind
+            self._log(f"Agent prompt uses the bind address {bind} "
+                      f"(bind-scoped, not the public IP).")
+        else:
+            host = self.public_ip or self.host_addr
         tls = bool(self.settings.get("tls", True)) and self.fingerprint
         # v2.5.1 (ASK-007): the SELECTED agent's key + name — the
         # picker drives the prompt, not the hardcoded agents[0].
@@ -3381,19 +3403,54 @@ class HostWindow(QMainWindow):
         self.port_edit.setEnabled(enabled)
         self.tls_check.setEnabled(enabled)
 
+    def _refresh_local_ips(self) -> None:
+        """v2.8: re-run zero-packet IPv4 discovery and rebuild the bind
+        dropdown, keeping the operator's current selection."""
+        ips = netinfo.local_ipv4s()
+        self._log("Detected local IPv4: "
+                  + (", ".join(ips) if ips else "(none)"))
+        self._rebuild_host_items()
+
+    def _rebuild_host_items(self, preserve: str = None) -> None:
+        """Bind dropdown items: 127.0.0.1, detected local IPv4s, then
+        the wildcards. Zero-packet discovery (core/netinfo.py) — nothing
+        is sent anywhere."""
+        cur = (preserve if preserve is not None
+               else self.host_combo.currentText().strip())
+        items = ["127.0.0.1"] + netinfo.local_ipv4s() + ["0.0.0.0", "::"]
+        self.host_combo.blockSignals(True)
+        self.host_combo.clear()
+        self.host_combo.addItems(items)
+        if cur:
+            self.host_combo.setCurrentText(cur)
+        self.host_combo.blockSignals(False)
+        self._update_exposure_warning()
+
     def _update_exposure_warning(self, *args) -> None:
+        # v2.8.1: this can fire during _build_overview_tab() — the
+        # dropdown is populated (and its currentTextChanged signal is
+        # armed) before the exposure label further down the same
+        # Connection card exists. Stay a no-op until the widget tree
+        # is complete; __init__ re-runs this right after _build_ui().
+        if getattr(self, "exposure_label", None) is None:
+            return
         host = self.host_combo.currentText().strip()
-        if host in ("0.0.0.0", "::", ""):
+        scope = netinfo.bind_scope(host)
+        if scope == "wildcard":
             self.exposure_label.setText(
                 "⚠ reachable from your whole network")
             self.exposure_label.setStyleSheet(
                 f"color: {C_RED}; font-weight: 600;")
-        elif host in ("127.0.0.1", "localhost", "::1"):
+        elif scope == "loopback":
             self.exposure_label.setText("localhost-only (safe)")
             self.exposure_label.setStyleSheet(
                 f"color: {C_GREEN}; font-weight: 600;")
         else:
-            self.exposure_label.setText(f"bound to {host}")
+            # v2.8: the scoped middle ground — one real interface.
+            self.exposure_label.setText(
+                f"bound to {host} — reachable from your local network "
+                f"only. Fine on a trusted LAN; prefer a tunnel for "
+                f"remote agents.")
             self.exposure_label.setStyleSheet(
                 f"color: {C_AMBER}; font-weight: 600;")
 

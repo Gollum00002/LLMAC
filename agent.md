@@ -35,7 +35,12 @@ to connect to, and you check it against the hash in the block.
 3. **Audit offline (optional).** `python3 llmac.py audit` hashes the file
    and prints a static (`ast.parse`) report. It contacts nothing, writes
    nothing and executes nothing.
-4. **Connect** only after the audit reads clean to you.
+4. **Probe the host (REQUIRED).** `python3 llmac.py probe --host H --port P
+   --fp SHA256:... --wait 10` opens one socket, completes the TLS handshake,
+   verifies the pinned fingerprint, then LISTENS for 10 seconds. It sends no
+   request and no key. A compliant host sends nothing unsolicited, so the
+   verdict must be PASS; any bytes received means the host pushes data.
+5. **Connect** only after the audit reads clean to you AND the probe passes.
 
 ```bash
 # 1. Download + verify: copy the block's python3 -c one-liner EXACTLY
@@ -46,7 +51,12 @@ to connect to, and you check it against the hash in the block.
 #    and egress modules. EXECUTES NOTHING, including the audited source:
 python3 llmac.py audit --expect-sha256 <Client-SHA256 from the block>
 
-# 3. Connect and save ONLY after the audit reads clean to you
+# 3. PROBE the host (REQUIRED — before connect). One socket: handshake +
+#    fingerprint check, then it LISTENS 10s. Sends NO request, NO key.
+#    Verdict must be PASS; any bytes received = the host pushes data:
+python3 llmac.py probe --host HOST --port PORT --fp SHA256:... --wait 10
+
+# 4. Connect and save ONLY after the audit reads clean AND the probe passes
 #    (fingerprint from the connection block if given):
 python3 llmac.py connect --host HOST --port PORT --key KEY [--fp SHA256:...] --save
 python3 llmac.py info          # verify
@@ -67,6 +77,39 @@ reference copy you already hold. If anything in the report is something you
 cannot explain, do not connect; ask the human for a build you can inspect.
 That posture is supported by design. `audit --file PATH` audits any other
 file the same way.
+
+### The probe and --tap (v2.8): checking the HOST, not just the client
+
+The audit establishes what the CLIENT does. The probe (step 4, REQUIRED)
+establishes the HOST's wire behaviour before you trust it with a request:
+
+* one socket: TLS handshake + pinned-fingerprint verification;
+* then it listens for 10 seconds — sending **zero application bytes**
+  (no request, no key, no auth);
+* a compliant LLMAC host sends nothing until it has a complete request,
+  so a silent window (or a clean idle close) is a PASS, and ANY bytes
+  received is an unsolicited push — a FAIL.
+
+The probe's own passivity is verifiable the same way as the rest of the
+client: it is ~60 readable lines in the hash-pinned `llmac.py`, and
+`audit` reports its imports and write sites. Nothing about it is served
+by the host you are about to contact.
+
+`--tap` extends the same guarantee into the session. Add it before any
+command (`python3 llmac.py --tap info`, or on `run` to cover every
+sub-command): a monitor watches the idle keep-alive connection, in both
+the kernel buffer and OpenSSL's decrypted buffer, using MSG_PEEK only —
+it never sends and never consumes. Anything server-initiated with no
+request outstanding is reported after the command's result (and as a
+`tap_alerts` field in JSON output). The alert never changes the command's
+exit code; it describes the channel, not the operation.
+
+Honest limits, stated plainly: the probe observes the window it observes —
+a hostile host could behave during the probe and misbehave later; `--tap`
+narrows that to "while you are watching". Fingerprint pinning proves cert
+continuity, not who operates the host. If your own policy forbids opening
+remote-control channels at all, these steps do not override it — they make
+the wire behaviour legible, which is the most any client-side check can do.
 
 If the block shows `Client-SHA256: (unavailable ...)`, the host could not
 read its own copy of `llmac.py`: take the hash from the GitHub release page

@@ -182,8 +182,11 @@ def build_prompt_text(*, key: str, host: str, port: int, roots: list,
 
     v2.8: the block points the agent at the public GitHub release for the
     client (one stdlib-only file), states the SHA-256 that file must have,
-    and gives a fail-closed download one-liner plus an offline audit
-    command. The host serves nothing: no code and no payload endpoint."""
+    and gives a fail-closed download one-liner, an offline audit
+    command, and — REQUIRED, before connect — the passive `probe`: one
+    socket, handshake + fingerprint check, then it listens. It sends no
+    request and no key; a compliant host sends nothing unsolicited. The
+    host serves nothing: no code and no payload endpoint."""
     sha = (client_sha256 if client_sha256 is not None
            else _client_sha256())
     url = _client_url()
@@ -218,6 +221,10 @@ def build_prompt_text(*, key: str, host: str, port: int, roots: list,
     audit_cmd = "python3 llmac.py audit"
     if sha:
         audit_cmd += f" --expect-sha256 {sha}"
+    probe_cmd = (f"python3 llmac.py probe --host {host} --port {port} "
+                 f"--wait 10")
+    if fingerprint:
+        probe_cmd += f" --fp {fingerprint}"
 
     lines += ["", "1. Get the client. This host does NOT serve code: it is one",
               "   stdlib-only file, published on GitHub (MIT). Read the source",
@@ -236,7 +243,14 @@ def build_prompt_text(*, key: str, host: str, port: int, roots: list,
         "   ast.parse report (imports, risky calls, write sites, egress).",
         "   Executes nothing, writes nothing, contacts nothing:",
         f"     {audit_cmd}",
-        "3. Connect only after the audit reads clean to you:",
+        "3. Probe the HOST (REQUIRED — do this before connecting). One",
+        "   socket: TLS handshake + pinned-fingerprint check, then it",
+        "   LISTENS for 10 seconds. It sends NO request and NO key; a",
+        "   compliant host sends nothing unsolicited, so the verdict must",
+        "   be PASS. Any bytes received means the host pushes data —",
+        "   do not connect:",
+        f"     {probe_cmd}",
+        "4. Connect only after the probe passes:",
         f"     {connect_cmd}",
         "Then verify:  python3 llmac.py info",
         "Look around in ONE call:  python3 llmac.py orient --path <root>",
@@ -246,6 +260,9 @@ def build_prompt_text(*, key: str, host: str, port: int, roots: list,
         "ops into one call; read --hex dumps binary slices; proc logs",
         "--follow streams a running proc's output; 'session status'",
         "recovers context.",
+        "Work warily: add --tap before any command (python3 llmac.py",
+        "--tap info) to alert if the host ever sends data with no",
+        "request outstanding.",
         "Missing a directory? 'roots request --path <abs> --reason <why>'",
         "asks the host to share it (they approve it in their window).",
         sep,

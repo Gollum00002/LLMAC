@@ -265,7 +265,7 @@ class TestDeployOutput(unittest.TestCase):
                             "returncode": 0, "stderr": ""}, 200
                 raise AssertionError("unexpected " + path)
 
-        ck = ("127.0.0.1", 1, "k", "", False)
+        ck = ("127.0.0.1", 1, "k", "", False, False)  # v2.8: +tap field
         mod._CLIENT_CACHE[ck] = FakeOldServer()
         try:
             lp = os.path.join(self.host.tmp, "l.txt")

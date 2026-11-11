@@ -1,10 +1,81 @@
 # CHANGES — v2 ("LLM Directory Bridge" → "LLMAC")
 
-## Unreleased (post-2.7.3) — the host no longer serves code
+## v2.8.1 — startup crash fix; launchers install requirements
+
+* **Fixed: GUI failed to start (`AttributeError: 'HostWindow' object has
+  no attribute 'exposure_label'`).** The v2.8.0 bind-dropdown rebuild
+  runs while the Overview tab is still being built — the dropdown is
+  populated before the exposure warning label further down the same
+  Connection card exists. `_update_exposure_warning` now stays a no-op
+  until the widget tree is complete (and its `currentTextChanged`
+  signal can no longer fire into a half-built window either); the
+  `__init__` pass right after `_build_ui()` paints the correct tier.
+* **Launchers create `venv/`, not `.venv/`, and install
+  `requirements.txt` right after creating it** (both `run.sh` and
+  `run.ps1`). A fresh checkout is now one command to a working GUI:
+  PyQt6 plus the v2.7 screen-channel deps (Pillow, pytesseract,
+  python-xlib) are all installed at creation time. A pre-2.8.1 `.venv`
+  found next to the script is renamed in place — packages are
+  preserved, nothing is re-downloaded.
+* **The existing-venv check now probes the full requirements set**, not
+  just PyQt6. venvs created by the old launcher (which installed PyQt6
+  alone) are detected as incomplete and repaired from
+  `requirements.txt` on the next GUI launch. The probe uses
+  `importlib.util.find_spec` — a module that is installed but broken
+  still counts as missing.
+* **`run.ps1` argument forwarding fixed and made PS 5.1-safe.** The old
+  `param([string[]]$Args)` collided with PowerShell's automatic `$args`
+  variable; the block is gone and all script arguments are forwarded
+  verbatim to `host.py` via `@args`. Native-command probes no longer
+  redirect stderr under `$ErrorActionPreference = "Stop"` (which turns
+  any Python traceback into a terminating `NativeCommandError` on
+  Windows PowerShell 5.1) — probes run with `EAP=Continue` and check
+  `$LASTEXITCODE` explicitly.
+* Headless mode is unchanged: no probe, straight to launch — but a
+  freshly created venv is fully provisioned anyway, so a later GUI
+  start needs nothing.
+* Version-truth pins move to 2.8.1 across the suite; `run.sh` verified
+  end-to-end (fresh install, complete-venv no-op, legacy incomplete
+  venv repair, `.venv` rename migration, headless) against a real
+  PyQt6 offscreen run; `run.ps1` is reviewed but untested (no Windows
+  box in the pipeline).
+
+## v2.8.0 — the host no longer serves code; probe & tap
 
 Cautious agents refuse to run code fetched from the machine they are about to
 connect to, however well it is hash-checked. The client is now distributed from
-GitHub, and the host serves nothing executable.
+GitHub, the host serves nothing executable, and two new client-side steps let
+an agent check the host's wire behaviour before and during a session.
+
+* **`llmac.py probe` — the REQUIRED pre-connection step (block step 3).**
+  One socket: TLS handshake, pinned-fingerprint check, then it LISTENS
+  for `--wait` seconds (default 10). It sends NO request and NO key —
+  zero application bytes. A compliant host is silent; any bytes
+  received is an unsolicited push and the verdict is FAIL (rc 1). Clean
+  EOF and a silent timeout are both PASS. The contract is verifiable
+  offline before running it (`audit` + the block's Client-SHA256 pin).
+* **`--tap` — unsolicited-data monitoring while you work.** A daemon
+  thread watches the idle keep-alive socket (both OpenSSL's decrypted
+  buffer and the kernel buffer, MSG_PEEK only — it never sends or
+  consumes). Anything server-initiated with no request outstanding is
+  alerted on stdout/stderr after the result and folded into JSON output
+  as `tap_alerts`. rc is untouched — the alert describes the channel,
+  not the op, mirroring the inbox-notice rules. Works per command
+  (`python3 llmac.py --tap info`) and rides into `run` sub-commands.
+* **GUI bind dropdown shows this machine's real IPv4s** — the missing
+  middle ground between `127.0.0.1` (nothing) and `0.0.0.0` (every
+  interface). A ⟳ button re-detects (router/VPN changes); the exposure
+  warning gains a scoped middle tier. New `core/netinfo.py`: zero-packet
+  UDP-connect route discovery (TEST-NET-1, RFC 5737) plus
+  `getaddrinfo(gethostname())`; stdlib only, no subprocess, no Qt.
+* **Bind-scoped agent prompts.** Bound to a specific interface (e.g.
+  `192.168.1.50`), "Copy agent prompt" now puts THAT address in the
+  `Host:` line instead of the public IP — behind NAT they differ, and
+  the agent was being pointed at the wrong interface.
+* New tests: `tests/test_probe_and_tap.py` (probe verdicts against a
+  real TLS host, an unsolicited-push listener and a wrong pin; tap
+  detection via socketpair; netinfo filtering). Version-truth pins move
+  to 2.8.0 across the suite.
 
 * **`cli.py` renamed to `llmac.py`** (the name agents already saved it under).
   `core/constants.py` `CLI_PATH`, launchers, tools and tests follow.

@@ -81,10 +81,10 @@ class TestVersion241(unittest.TestCase):
     def test_health_and_info_report_241(self):
         resp, status = self.host.get("/health")
         self.assertEqual(status, 200)
-        self.assertEqual(resp["version"], "2.7.3")
+        self.assertEqual(resp["version"], "2.8.1")
         r = run_cli(self.host, "info")
         self.assertEqual(r.returncode, 0)
-        self.assertIn('"2.7.3"', r.stdout)
+        self.assertIn('"2.8.1"', r.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ class TestOverview(unittest.TestCase):
     def test_overview_shape(self):
         resp, status = self.host.post("/overview", {})
         self.assertEqual(status, 200)
-        self.assertEqual(resp["info"]["version"], "2.7.3")
+        self.assertEqual(resp["info"]["version"], "2.8.1")
         self.assertIn("policy", resp["info"])
         self.assertIn("roots", resp["info"])
         self.assertTrue(any(e["name"] == "README.md"
@@ -567,7 +567,7 @@ class TestDeployFastPath(unittest.TestCase):
                             "stderr": ""}, 200
                 raise AssertionError("unexpected " + path)
 
-        ck = ("127.0.0.1", 1, "k", "", False)
+        ck = ("127.0.0.1", 1, "k", "", False, False)  # v2.8: +tap field
         mod._CLIENT_CACHE[ck] = FakeClient()
         try:
             # conn="v241-hermetic": a NONEXISTENT conn name so the real

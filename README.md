@@ -63,7 +63,8 @@ Then, in the GUI:
    none and approve the agent's share requests one click at a time.
 2. Click **Copy agent prompt** and paste the connection block into your AI chat.
    The block carries the host, port, key and certificate fingerprint, plus a link
-   to the client on GitHub and the SHA-256 that file must have.
+   to the client on GitHub, the SHA-256 that file must have, and a REQUIRED
+   pre-connection `probe` step the agent runs before connecting.
 3. Keep the **Log** and **Approvals** tabs open. Approve or deny as requests
    arrive. Stop the server when you are done.
 
@@ -117,8 +118,18 @@ nothing and contacts GitHub only.
    It hashes the file and prints a static (`ast.parse`) report of imports, risky
    calls, write sites and egress. It **contacts nothing, writes nothing and
    executes nothing.**
-3. If anything in the report is unexplained, do not connect. Refusing until the
-   code is reviewable is a supported outcome, not a failure.
+3. Probe the host (REQUIRED — step 3 of the connection block, before
+   connecting):
+   ```bash
+   python3 llmac.py probe --host <Host> --port <Port> --fp <Cert from the block> --wait 10
+   ```
+   One socket: TLS handshake + pinned-fingerprint check, then it LISTENS for
+   10 seconds. It sends no request and no key; a compliant host sends nothing
+   unsolicited, so the verdict must be **PASS**. Any bytes received means the
+   host pushes data — do not connect. The probe's own passivity is verifiable
+   offline (`audit` + the block's hash pin), same as the rest of the client.
+4. If anything in the report is unexplained or the probe fails, do not connect.
+   Refusing until the code is reviewable is a supported outcome, not a failure.
 
 A hash proves the bytes are the ones published. It does not prove what the
 bytes do. That is why the audit step and this source repository exist.
@@ -136,6 +147,11 @@ bytes do. That is why the audit step and this source repository exist.
 
 **For the agent (structured, context-cheap tools)**
 
+- `probe` — REQUIRED pre-connection check: one socket, TLS handshake +
+  pinned-fingerprint check, then it listens for 10s. Sends no request and
+  no key; any bytes received = unsolicited push = FAIL
+- `--tap` — watches the idle connection while commands run and alerts on
+  server data with no request outstanding
 - `orient`, `tree`, `search` (grep and glob with caps), ranged `read`, hex
   `read` for binaries
 - Surgical `edit` with returned diffs, whole-file `write`, write versioning
@@ -151,6 +167,9 @@ bytes do. That is why the audit step and this source repository exist.
 
 - Tabbed GUI: connection card, shared directories, agents, approvals, processes
   (with live log tails), policy/TLS settings, log
+- Bind dropdown with this machine's auto-detected IPv4s (zero-packet
+  discovery) between `127.0.0.1` and `0.0.0.0`, with a scoped exposure
+  warning; a specific bind also scopes the agent prompt's `Host:` line
 - Per-agent keys with scoped roots, permissions (`read`, `write`, `delete`,
   `exec`, `proc`) and optional expiry; rotate any key without breaking others
 - Approval policies: `destructive` (GUI default), `strict`, `auto` (headless
@@ -218,8 +237,8 @@ Runtime state lives in `bridge_data/` next to the project (git-ignored):
 python3 -m unittest discover -s tests -v
 ```
 
-The suite has 680+ tests covering the sandbox, policy engine, API, approvals,
-TLS, the download one-liner and the offline audit.
+The suite has 700+ tests covering the sandbox, policy engine, API, approvals,
+TLS, the probe and tap monitors, the download one-liner and the offline audit.
 
 ## Contributing
 

@@ -93,6 +93,28 @@ have; the download one-liner compares it and refuses to write the file on any
 mismatch. The one-liner executes nothing. The old `GET /bootstrap` endpoint was
 removed in v2.8 and now returns HTTP 410 with no code and no hash.
 
+**Pre-connection probe (v2.8).** The connection block's REQUIRED step 3 is
+`llmac.py probe`: one socket, TLS handshake, pinned-fingerprint check, then it
+listens for 10 seconds without sending any request or key. A compliant host
+sends nothing until it has a complete request, so any bytes received is an
+unsolicited push and the verdict is FAIL. This gives the agent a
+client-verifiable check on the host's wire behaviour — and the host cannot
+fake a pass, because a pass consists of NOT doing something. The probe's own
+passivity is verifiable offline (`audit` + the block's hash pin), like the
+rest of the client.
+
+**`--tap` (v2.8).** After connecting, the agent can run any command with
+`--tap`: a monitor watches the idle keep-alive connection (MSG_PEEK only,
+kernel buffer and OpenSSL's decrypted buffer) and alerts on any
+server-initiated bytes with no request outstanding. The alert rides the
+command's result (and JSON `tap_alerts`); it never changes exit codes.
+
+Both checks observe behaviour, not intent: a hostile endpoint could stay
+silent during a probe and push later — `--tap` narrows that window to "while
+the agent is watching", and neither proves who operates the endpoint. They
+make the wire legible; they do not replace the operator trusting the agent,
+or the agent's platform trusting the endpoint.
+
 **Filesystem sandbox.** Every path is resolved with `realpath` and must land
 inside a shared root. Symlinks pointing outside, `..` traversal and `~` are
 rejected. Shared roots themselves and `.git` directories cannot be deleted.

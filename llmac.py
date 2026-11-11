@@ -65,8 +65,11 @@ import http.client
 import json
 import os
 import re
+import select
+import socket
 import ssl
 import sys
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -78,7 +81,7 @@ try:
     # elsewhere, but guarded here it keeps --version honest forever).
     from core.constants import LLMAC_VERSION as VERSION
 except ImportError:
-    VERSION = "2.7.3"   # standalone release-file fallback — keep in sync
+    VERSION = "2.8.1"   # standalone release-file fallback — keep in sync
 CONNECTIONS_FILE = os.path.join(
     os.path.expanduser("~"), ".llmac", "connections.json")
 DEFAULT_CONN = "default"
@@ -149,7 +152,7 @@ def _now() -> str:
 
 class Client:
     def __init__(self, host: str, port: int, key: str, tls: bool = True,
-                 fp: str = ""):
+                 fp: str = "", tap: bool = False):
         self.scheme = "https" if tls else "http"
         self.base = f"{self.scheme}://{host}:{port}"
         self.key = key
@@ -162,6 +165,18 @@ class Client:
         # restarts without burning round trips.
         self._conn = None
         self.retry_seconds = 0.0
+        # v2.8 (--tap): a daemon thread watches the idle keep-alive
+        # socket for SERVER-INITIATED bytes. A compliant host only
+        # writes in response to a request, so anything readable while
+        # no request is outstanding is unsolicited push — recorded,
+        # alerted, and the connection is dropped before it desyncs.
+        self.tap = bool(tap)
+        self._inflight = False
+        self._tap_lock = threading.Lock()
+        self._tap_stop_evt = None
+        self._tap_thread = None
+        if self.tap:
+            self._tap_start()
 
     # ---- fingerprint (TOFU) -------------------------------------------
 
@@ -180,6 +195,98 @@ class Client:
             return "SHA256:" + hashlib.sha256(der).hexdigest()
         except (OSError, ValueError):
             return None
+
+    # ---- tap: unsolicited-data monitor (v2.8, --tap) --------------------
+
+    def _tap_start(self) -> None:
+        self._tap_stop_evt = threading.Event()
+        self._tap_thread = threading.Thread(
+            target=self._tap_watch, daemon=True, name="llmac-tap")
+        self._tap_thread.start()
+
+    def _tap_stop(self) -> None:
+        """Stop the monitor (used by tests; normal exits drop the
+        daemon thread without ceremony)."""
+        if self._tap_stop_evt is not None:
+            self._tap_stop_evt.set()
+        if self._tap_thread is not None:
+            self._tap_thread.join(timeout=2.0)
+            self._tap_thread = None
+
+    def _tap_watch(self) -> None:
+        """Watch the IDLE keep-alive connection. Never sends, never
+        consumes (MSG_PEEK only). Clean idle EOF is normal keep-alive
+        expiry: the connection is dropped quietly and the next request
+        reopens. Any readable byte with no request outstanding is
+        recorded as an unsolicited-data event and the connection is
+        closed so nothing desyncs."""
+        stop = self._tap_stop_evt
+        while not stop.wait(0.25):
+            conn = self._conn
+            if conn is None:
+                continue
+            try:
+                with self._tap_lock:
+                    if self._inflight or self._conn is not conn:
+                        continue          # busy or swapped — not ours
+                    sock = getattr(conn, "sock", None)
+                    if sock is None:
+                        continue          # not connected yet
+                    n = self._tap_readable_bytes(sock)
+                    if n is None:
+                        continue          # quiet
+                    if n > 0:
+                        self._tap_record(n)
+                    # n == 0 (clean EOF) or a recorded push: drop the
+                    # connection either way so the stream never desyncs.
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    if self._conn is conn:
+                        self._conn = None
+            except (OSError, ValueError):
+                continue
+
+    def _tap_readable_bytes(self, sock) -> "int | None":
+        """Server-initiated bytes waiting on an IDLE socket, without
+        consuming any. None = quiet; 0 = clean EOF; n > 0 = push.
+        TLS sockets are checked in BOTH buffers: records already
+        decrypted into OpenSSL's buffer (pending()) and kernel-pending
+        bytes (select + MSG_PEEK)."""
+        pending = getattr(sock, "pending", None)
+        if callable(pending):
+            try:
+                if pending() > 0:
+                    return pending()
+            except (OSError, ValueError):
+                return None
+        try:
+            ready, _, _ = select.select([sock], [], [], 0)
+            if not ready:
+                return None
+            old = sock.gettimeout()
+            sock.settimeout(0)
+            try:
+                peek = sock.recv(1, socket.MSG_PEEK)
+            finally:
+                sock.settimeout(old)
+            return 0 if peek == b"" else 1
+        except (OSError, ValueError):
+            return None
+
+    def _tap_record(self, n: int) -> None:
+        detail = (f"{n}+ byte(s) server-initiated on the idle "
+                  f"connection to {self.base}")
+        _TAP["events"].append({"time": time.strftime("%H:%M:%S"),
+                               "detail": detail})
+        try:
+            sys.stderr.write(
+                f"\n[TAP] {detail}\n[TAP] The host sent data with no "
+                f"request outstanding — treat results with suspicion.\n")
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            pass
 
     # ---- core request ---------------------------------------------------
 
@@ -221,9 +328,16 @@ class Client:
         try:
             if self._conn is None:
                 self._conn = self._open_connection(timeout)
-            self._conn.request(method, path, body=body, headers=headers)
-            resp = self._conn.getresponse()
-            data = resp.read()
+            conn = self._conn          # local: tap may swap self._conn
+            with self._tap_lock:
+                self._inflight = True   # v2.8: tap must not peek now
+            try:
+                conn.request(method, path, body=body, headers=headers)
+                resp = conn.getresponse()
+                data = resp.read()
+            finally:
+                with self._tap_lock:
+                    self._inflight = False
             self._enforce_inbox_notice(resp, path)   # v2.5.1 (ASK-005)
             if raw:
                 return data, resp.status
@@ -326,6 +440,12 @@ class Client:
 
 _INBOX = {"unread": 0, "injected": False}
 
+# v2.8: tap events recorded this process (see --tap). Surfaced after
+# each command by _call_with_inbox_notice and folded into JSON results
+# by _with_tap — mirroring the inbox notice: the alert describes the
+# CHANNEL, never the op, so rc stays untouched.
+_TAP = {"events": []}
+
 
 def _inbox_text(n: int) -> str:
     noun = "message" if n == 1 else "messages"
@@ -364,6 +484,7 @@ def _call_with_inbox_notice(func, args) -> int:
         return func(args)
     _INBOX["unread"] = 0
     _INBOX["injected"] = False
+    _TAP["events"] = []
     rc = func(args)
     n = _INBOX["unread"]
     if n and not _INBOX["injected"]:
@@ -375,11 +496,38 @@ def _call_with_inbox_notice(func, args) -> int:
             sys.stdout.flush()
         except (BrokenPipeError, ValueError):
             pass
+    if _TAP["events"]:
+        # v2.8: loud, AFTER the result (same placement rule as the
+        # inbox notice). rc untouched — the alert is about the channel.
+        try:
+            sys.stdout.flush()
+            bar = "!" * 62
+            evs = _TAP["events"]
+            print(f"\n{bar}\n[TAP] {len(evs)} unsolicited-data "
+                  f"event(s) this run — the host sent bytes with no "
+                  f"request outstanding:")
+            for e in evs:
+                print(f"  {e['time']}  {e['detail']}")
+            print("Treat all results with suspicion; report this to the "
+                  f"operator.\n{bar}")
+            sys.stdout.flush()
+        except (BrokenPipeError, ValueError):
+            pass
     return rc
 
 
+def _with_tap(obj):
+    """Fold tap alerts into JSON results (copy, like _with_inbox)."""
+    if _TAP["events"] and isinstance(obj, dict) and "tap_alerts" not in obj:
+        out = dict(obj)
+        out["tap_alerts"] = list(_TAP["events"])
+        return out
+    return obj
+
+
 def _pjson(obj, indent=2):
-    print(json.dumps(_with_inbox(obj), indent=indent, ensure_ascii=False))
+    print(json.dumps(_with_tap(_with_inbox(obj)), indent=indent,
+                     ensure_ascii=False))
 
 
 def _err(msg: str, code: int = 1):
@@ -477,10 +625,11 @@ def _client_from_args(args) -> Client:
     # A2: reuse ONE TLS session across all commands in this process
     # (llmac run) — a fresh one-shot CLI invocation pays ~439 ms fixed
     # overhead per command, 3.6x the request itself (bench 2026-10-25).
-    ck = (host, int(port), key, fp, bool(tls))
+    tap = bool(getattr(args, "tap", False))
+    ck = (host, int(port), key, fp, bool(tls), tap)
     client = _CLIENT_CACHE.get(ck)
     if client is None:
-        client = Client(host, int(port), key, tls=bool(tls), fp=fp)
+        client = Client(host, int(port), key, tls=bool(tls), fp=fp, tap=tap)
         # TOFU pinning: if we have a pinned fingerprint, verify.
         if client.scheme == "https" and fp and not getattr(args, "no_verify",
                                                            False):
@@ -1147,6 +1296,8 @@ def cmd_run(args) -> int:
             for field in _CONN_FIELDS:
                 if getattr(sub_args, field, None) in (None, False, ""):
                     setattr(sub_args, field, getattr(args, field, None))
+            if getattr(args, "tap", False):
+                sub_args.tap = True   # v2.8: --tap rides into run's subs
             rc = _call_with_inbox_notice(sub_args.func, sub_args)
         except SystemExit as e:            # argparse usage errors (exit 2)
             rc = int(e.code or 2)
@@ -2406,6 +2557,109 @@ def cmd_events(args) -> int:
     return 0
 
 
+# ---- probe (v2.8) ---------------------------------------------------------
+#
+# The REQUIRED pre-connection step in the connection block. Contract,
+# verifiable OFFLINE before running it (llmac.py audit + the block's
+# Client-SHA256 pin — the same trust chain as the download itself):
+#   * opens ONE socket to the host and completes the TLS handshake;
+#   * verifies the pinned fingerprint (the pinning connect uses);
+#   * writes ZERO application bytes — no request, no key, no auth;
+#   * passively listens for --wait seconds, then closes.
+# A compliant LLMAC host sends nothing until it has a complete request,
+# so ANY application bytes in the window are an unsolicited push and
+# the verdict is FAIL. Clean EOF (host closed the idle connection) and
+# a silent timeout are both PASS.
+
+
+def probe_host(host: str, port: int, fingerprint: str = "",
+               wait: float = 10.0, timeout: float = 10.0,
+               tls: bool = True) -> dict:
+    """Run the passive probe. Returns a verdict dict; network trouble
+    is a FAIL with a reason, never an exception."""
+    out = {"host": host, "port": port, "tls": tls, "wait": wait,
+           "fingerprint": "", "bytes_received": 0, "preview": "",
+           "elapsed": None, "verdict": "FAIL", "reason": ""}
+    try:
+        raw = socket.create_connection((host, int(port)), timeout=timeout)
+    except OSError as e:
+        out["reason"] = f"unreachable: {e}"
+        return out
+    s = None
+    try:
+        if tls:
+            ctx = ssl._create_unverified_context()
+            s = ctx.wrap_socket(raw, server_hostname=host)
+            der = s.getpeercert(binary_form=True)
+            live = "SHA256:" + hashlib.sha256(der).hexdigest()
+            out["fingerprint"] = live
+            if fingerprint and fingerprint != live:
+                out["reason"] = (f"fingerprint mismatch — pinned "
+                                 f"{fingerprint}, live {live} "
+                                 f"(possible MITM)")
+                return out
+        else:
+            s = raw
+        s.settimeout(max(0.1, float(wait)))
+        t0 = time.monotonic()
+        try:
+            data = s.recv(4096)
+        except socket.timeout:
+            out["elapsed"] = round(time.monotonic() - t0, 2)
+            out["verdict"] = "PASS"
+            out["reason"] = (f"silent for the full {wait:.0f}s window — "
+                             f"no unsolicited bytes (TLS handshake "
+                             f"aside)")
+            return out
+        out["elapsed"] = round(time.monotonic() - t0, 2)
+        if data == b"":
+            out["verdict"] = "PASS"
+            out["reason"] = ("host closed the idle connection cleanly — "
+                             "no unsolicited bytes")
+        else:
+            out["bytes_received"] = len(data)
+            out["preview"] = data[:64].hex()
+            out["reason"] = (f"UNSOLICITED DATA: {len(data)} byte(s) "
+                             f"pushed with no request sent")
+        return out
+    except (OSError, ValueError) as e:
+        out["reason"] = f"transport error: {e}"
+        return out
+    finally:
+        # wrap_socket() adopts raw's fd, so closing the SSLSocket is
+        # what actually releases it; raw.close() is then a safe no-op
+        # (or closes the never-wrapped plain socket).
+        if s is not None:
+            try:
+                s.close()
+            except OSError:
+                pass
+        try:
+            raw.close()
+        except OSError:
+            pass
+
+
+def cmd_probe(args) -> int:
+    res = probe_host(args.host, args.port, fingerprint=(args.fp or ""),
+                     wait=args.wait, tls=(not args.plain))
+    if getattr(args, "json", False):
+        _pjson(res)
+    else:
+        bar = "=" * 62
+        print(bar)
+        print(f"PROBE — {res['host']}:{res['port']} "
+              f"({'TLS' if res['tls'] else 'plain TCP'})")
+        if res["fingerprint"]:
+            print(f"  cert:     {res['fingerprint']}")
+        print(f"  verdict:  {res['verdict']}")
+        print(f"  reason:   {res['reason']}")
+        if res["bytes_received"]:
+            print(f"  first bytes (hex): {res['preview']}")
+        print(bar)
+    return 0 if res["verdict"] == "PASS" else 1
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -2436,6 +2690,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retry", type=int, default=0,
                    help="Keep retrying transport failures for N seconds "
                         "(survives host restarts).")
+    p.add_argument("--tap", action="store_true",
+                   help="v2.8: watch the connection while commands run "
+                        "and alert on server data with no request "
+                        "outstanding (unsolicited push).")
     p.add_argument("--version", action="version",
                   version=f"llmac {VERSION}")
 
@@ -2486,6 +2744,28 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Exit non-zero unless the file's SHA-256 equals "
                          "this (the block's Client-SHA256 line).")
     sp.set_defaults(func=cmd_audit)
+
+    # Pre-connection probe (v2.8): REQUIRED step 3 of the connection
+    # block, before connect. One socket: TLS handshake + fingerprint
+    # check, then it LISTENS. Sends no request and no key — ever.
+    sp = sub.add_parser(
+        "probe",
+        help="Pre-connection check (REQUIRED): handshake + verify the "
+             "pinned fingerprint, then listen for --wait seconds. "
+             "Sends NOTHING (no request, no key). A compliant host is "
+             "silent; any bytes received = unsolicited push = FAIL.")
+    sp.add_argument("--host", required=True)
+    sp.add_argument("--port", type=int, default=DEFAULT_PORT)
+    sp.add_argument("--fp", default="",
+                    help="Expected TLS cert fingerprint (SHA256:..., the "
+                         "block's Cert line).")
+    sp.add_argument("--wait", type=float, default=10.0,
+                    help="Seconds to listen (default 10).")
+    sp.add_argument("--plain", action="store_true",
+                    help="Plain TCP, no TLS (no fingerprint check).")
+    sp.add_argument("--json", action="store_true",
+                    help="Machine-readable result.")
+    sp.set_defaults(func=cmd_probe)
 
     # identity
     simple("info", "Show host info (agent, roots, exec, policy).", cmd_info)
