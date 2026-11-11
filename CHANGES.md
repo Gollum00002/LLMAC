@@ -1,5 +1,21 @@
 # CHANGES — v2 ("LLM Directory Bridge" → "LLMAC")
 
+## v2.8.2 — the bind is not the advertised host
+
+* **Fixed: v2.8.0's bind-scoped prompts pointed remote agents at a LAN
+  address.** Binding to a specific local IPv4 (e.g. `192.168.0.176`)
+  also rewrote the copied agent prompt's `Host:` line to that address
+  instead of the public IP remote AI/LLM agents actually connect to —
+  behind port forwarding / NAT the public IP is what routes to the
+  machine, and a LAN address is unreachable from outside. The two
+  concerns are now independent: the bind dropdown only selects the
+  interface the server socket listens on; the prompt's `Host:` line is
+  the public IP regardless of bind (the bind address stands in only as
+  a fallback while the public IP is being fetched). `Copy Prompt` logs
+  both facts when the bind is a specific IPv4, and the README bullet
+  no longer claims the bind scopes the prompt.
+* Version-truth pins move to 2.8.2 across the suite.
+
 ## v2.8.1 — startup crash fix; launchers install requirements
 
 * **Fixed: GUI failed to start (`AttributeError: 'HostWindow' object has

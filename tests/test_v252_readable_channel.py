@@ -376,23 +376,23 @@ class TestHarnessPins(unittest.TestCase):
 class TestVersion252(unittest.TestCase):
 
     def test_constants_version(self):
-        self.assertEqual(LLMAC_VERSION, "2.8.1")
+        self.assertEqual(LLMAC_VERSION, "2.8.2")
 
     def test_constants_src_literal(self):
         src = open(os.path.join(_PARENT, "core", "constants.py"),
                    encoding="utf-8").read()
-        self.assertIn('LLMAC_VERSION = "2.8.1"', src)
+        self.assertIn('LLMAC_VERSION = "2.8.2"', src)
 
     def test_cli_fallback_literal(self):
         src = open(CLI, encoding="utf-8").read()
-        self.assertIn('VERSION = "2.8.1"', src)
+        self.assertIn('VERSION = "2.8.2"', src)
 
     def test_info_version_live(self):
         host = TestHost()
         self.addCleanup(host.stop)
         resp, st = host.get("/info")
         self.assertEqual(st, 200)
-        self.assertEqual(resp["version"], "2.8.1")
+        self.assertEqual(resp["version"], "2.8.2")
 
     def test_changes_entry(self):
         src = open(CHANGES_SRC, encoding="utf-8").read()

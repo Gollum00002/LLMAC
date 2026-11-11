@@ -169,7 +169,8 @@ bytes do. That is why the audit step and this source repository exist.
   (with live log tails), policy/TLS settings, log
 - Bind dropdown with this machine's auto-detected IPv4s (zero-packet
   discovery) between `127.0.0.1` and `0.0.0.0`, with a scoped exposure
-  warning; a specific bind also scopes the agent prompt's `Host:` line
+  warning; the bind only selects the listening interface — the agent
+  prompt's `Host:` line always carries the public IP
 - Per-agent keys with scoped roots, permissions (`read`, `write`, `delete`,
   `exec`, `proc`) and optional expiry; rotate any key without breaking others
 - Approval policies: `destructive` (GUI default), `strict`, `auto` (headless

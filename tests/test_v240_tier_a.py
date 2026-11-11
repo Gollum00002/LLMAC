@@ -58,7 +58,7 @@ class TestVersion(unittest.TestCase):
         r = subprocess.run([sys.executable, CLI, "--version"],
                            capture_output=True, text=True, cwd=_PARENT)
         self.assertEqual(r.returncode, 0)
-        self.assertIn("llmac 2.8.1", r.stdout)
+        self.assertIn("llmac 2.8.2", r.stdout)
         self.assertNotIn("2.3.0", r.stdout)
 
     def test_standalone_fallback_without_core(self):
@@ -70,7 +70,7 @@ class TestVersion(unittest.TestCase):
             r = subprocess.run([sys.executable, "llmac.py", "--version"],
                                capture_output=True, text=True, cwd=td)
             self.assertEqual(r.returncode, 0)
-            self.assertIn("llmac 2.8.1", r.stdout)
+            self.assertIn("llmac 2.8.2", r.stdout)
 
 
 # ---------------------------------------------------------------------------

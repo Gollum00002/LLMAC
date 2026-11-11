@@ -81,10 +81,10 @@ class TestVersion241(unittest.TestCase):
     def test_health_and_info_report_241(self):
         resp, status = self.host.get("/health")
         self.assertEqual(status, 200)
-        self.assertEqual(resp["version"], "2.8.1")
+        self.assertEqual(resp["version"], "2.8.2")
         r = run_cli(self.host, "info")
         self.assertEqual(r.returncode, 0)
-        self.assertIn('"2.8.1"', r.stdout)
+        self.assertIn('"2.8.2"', r.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ class TestOverview(unittest.TestCase):
     def test_overview_shape(self):
         resp, status = self.host.post("/overview", {})
         self.assertEqual(status, 200)
-        self.assertEqual(resp["info"]["version"], "2.8.1")
+        self.assertEqual(resp["info"]["version"], "2.8.2")
         self.assertIn("policy", resp["info"])
         self.assertIn("roots", resp["info"])
         self.assertTrue(any(e["name"] == "README.md"

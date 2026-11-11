@@ -81,7 +81,7 @@ try:
     # elsewhere, but guarded here it keeps --version honest forever).
     from core.constants import LLMAC_VERSION as VERSION
 except ImportError:
-    VERSION = "2.8.1"   # standalone release-file fallback — keep in sync
+    VERSION = "2.8.2"   # standalone release-file fallback — keep in sync
 CONNECTIONS_FILE = os.path.join(
     os.path.expanduser("~"), ".llmac", "connections.json")
 DEFAULT_CONN = "default"

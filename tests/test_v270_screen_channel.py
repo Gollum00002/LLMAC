@@ -988,14 +988,14 @@ class TestApiSourcePins(unittest.TestCase):
 class TestVersionTruth270(unittest.TestCase):
 
     def test_constants_version(self):
-        self.assertEqual(LLMAC_VERSION, "2.8.1")
+        self.assertEqual(LLMAC_VERSION, "2.8.2")
 
     def test_both_copies_pin(self):
         c = open(os.path.join(_PARENT, "core", "constants.py"),
                  encoding="utf-8").read()
-        self.assertIn('LLMAC_VERSION = "2.8.1"', c)
+        self.assertIn('LLMAC_VERSION = "2.8.2"', c)
         cli = open(CLI, encoding="utf-8").read()
-        self.assertIn('VERSION = "2.8.1"', cli)
+        self.assertIn('VERSION = "2.8.2"', cli)
 
     def test_live_info_reports_270(self):
         host = TestHost()
@@ -1007,7 +1007,7 @@ class TestVersionTruth270(unittest.TestCase):
         resp = conn.getresponse()
         data = json.loads(resp.read())
         self.assertEqual(resp.status, 200)
-        self.assertEqual(data["version"], "2.8.1")
+        self.assertEqual(data["version"], "2.8.2")
 
     def test_changes_has_entry(self):
         src = open(CHANGES_SRC, encoding="utf-8").read()

@@ -7,7 +7,7 @@ import os
 # Identity / protocol
 # ---------------------------------------------------------------------------
 
-LLMAC_VERSION = "2.8.1"
+LLMAC_VERSION = "2.8.2"
 KEY_PREFIX = "llmac_"
 STATE_SCHEMA_VERSION = 2
 EXPORT_FORMAT = "llmac-session-export"

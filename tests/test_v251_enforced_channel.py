@@ -310,19 +310,19 @@ class TestPickerPins(unittest.TestCase):
 class TestVersionTruth251(unittest.TestCase):
 
     def test_constants_version(self):
-        self.assertEqual(LLMAC_VERSION, "2.8.1")
+        self.assertEqual(LLMAC_VERSION, "2.8.2")
 
     def test_cli_fallback_in_sync(self):
         with open(CLI, encoding="utf-8") as f:
             src = f.read()
-        self.assertIn('VERSION = "2.8.1"', src)
+        self.assertIn('VERSION = "2.8.2"', src)
 
     def test_info_reports_version(self):
         host = TestHost()
         self.addCleanup(host.stop)
         resp, status = host.get("/info")
         self.assertEqual(status, 200)
-        self.assertEqual(resp["version"], "2.8.1")
+        self.assertEqual(resp["version"], "2.8.2")
 
 
 if __name__ == "__main__":

@@ -2022,19 +2022,28 @@ class HostWindow(QMainWindow):
         if self.public_ip is None:
             self._log("Public IP not yet known - fetching...")
             self._fetch_public_ip_async()
-        # v2.8: bind-scoped Host line. A specific bind (e.g. 192.168.1.50)
-        # is the operator's explicit choice of interface — the prompt must
-        # carry THAT address, not the public IP (behind NAT they differ;
-        # the agent would be pointed at the wrong interface). The public
-        # IP stays correct for the 0.0.0.0 bind-with-forwarding setup.
+        # v2.8.2: bind and advertised host are SEPARATE concerns. The
+        # bind (dropdown) picks the interface the server SOCKET listens
+        # on; the prompt's Host line must carry the address AGENTS
+        # CONNECT TO — the public IP (forwarded/NATed to this machine).
+        # v2.8.0's "bind-scoped Host" conflated the two: an operator
+        # binding a specific local IPv4 (e.g. 192.168.0.176) got that
+        # LAN address in the prompt — which remote agents can never
+        # reach. Reverted: the Host line is the public IP again,
+        # whatever the bind; only while the public IP is unknown does
+        # the bind address stand in as a best-effort fallback.
         bind = (self.host_combo.currentText().strip()
                 if hasattr(self, "host_combo") else self.host_addr)
+        host = self.public_ip or self.host_addr
         if netinfo.bind_scope(bind) == "specific":
-            host = bind
-            self._log(f"Agent prompt uses the bind address {bind} "
-                      f"(bind-scoped, not the public IP).")
-        else:
-            host = self.public_ip or self.host_addr
+            if self.public_ip:
+                self._log(f"Socket binds the local interface {bind}; "
+                          f"the prompt advertises the public IP {host} "
+                          f"— the two are independent.")
+            else:
+                self._log(f"Public IP still unknown — prompt Host fell "
+                          f"back to {bind}. Copy the prompt again once "
+                          f"the fetch completes.", "WARN")
         tls = bool(self.settings.get("tls", True)) and self.fingerprint
         # v2.5.1 (ASK-007): the SELECTED agent's key + name — the
         # picker drives the prompt, not the hardcoded agents[0].
