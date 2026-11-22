@@ -1,5 +1,38 @@
 # CHANGES — v2 ("LLM Directory Bridge" → "LLMAC")
 
+## v2.8.3 — one stalled connection no longer freezes the host
+
+* **Fixed: "TCP timeout, persists until restart" (info / orient / every
+  command).** The host wrapped its LISTENING socket in TLS, so `accept()`
+  ran the TLS handshake on the single `serve_forever` thread, with no
+  timeout. One TCP connection that connected and then went silent (an
+  agent sandbox killing its process mid-connect, a proxy/NAT dropping the
+  flow without FIN/RST, a scanner) parked the accept loop forever; every
+  later client timed out until the host was restarted. The listening
+  socket is now plain and the handshake runs on the per-connection worker
+  thread under `TLS_HANDSHAKE_TIMEOUT_S` (10 s). A stalled peer can only
+  burn its own thread, briefly. Regression: `tests/test_v283_stalled_handshake.py`.
+* **Fixed: GUI froze when stopping a server that had been running a
+  while.** `server.shutdown()` runs on the GUI thread and waits for
+  `serve_forever` to exit; that loop was the one wedged in a stalled TLS
+  handshake (same root cause as above). Reproduced on the 2.8.2 code
+  (Stop never returned), fixed by the handshake move. Belt and braces:
+  new `core.server.stop_server()` runs shutdown on a helper thread with a
+  3 s bound and always closes the listening socket; the GUI Stop button
+  and headless Ctrl+C both use it. Tests in `test_v283_stalled_handshake.py`.
+* Per-connection read deadline (`CONN_IDLE_TIMEOUT_S`, 300 s; idle
+  keep-alive or half-sent request), TCP keepalive on accepted sockets, and
+  listen backlog 5 -> 128 (bursts of parallel agent calls were dropped).
+* **Client (`llmac.py`): TCP connect + TLS handshake now have their own
+  15 s deadline** (`CONNECT_TIMEOUT`) instead of the 130-300 s request
+  timeout, so an unresponsive host fails fast with a clear message rather
+  than outliving the chat tool's call limit and leaving another half-open
+  connection behind. A reused keep-alive socket now also takes the CURRENT
+  call's timeout instead of the one from whichever call opened it.
+* NOTE: `llmac.py` changed, so its SHA-256 changed. Republish the release
+  asset before copying a new connection prompt.
+* Version-truth pins move to 2.8.3 across the suite (706 tests pass).
+
 ## v2.8.2 — the bind is not the advertised host
 
 * **Fixed: v2.8.0's bind-scoped prompts pointed remote agents at a LAN

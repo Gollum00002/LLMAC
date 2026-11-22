@@ -7,7 +7,7 @@ import os
 # Identity / protocol
 # ---------------------------------------------------------------------------
 
-LLMAC_VERSION = "2.8.2"
+LLMAC_VERSION = "2.8.3"
 KEY_PREFIX = "llmac_"
 STATE_SCHEMA_VERSION = 2
 EXPORT_FORMAT = "llmac-session-export"
@@ -23,6 +23,13 @@ DEFAULT_PORT = 8765
 # accidental exposure of the bearer key + file contents in cleartext.
 DEFAULT_HOST = "127.0.0.1"
 EXPOSED_HOST = "0.0.0.0"
+# v2.8.3: a peer that connects but never completes the TLS handshake may
+# only occupy its own worker thread, and only for this long.
+TLS_HANDSHAKE_TIMEOUT_S = 10
+# Per-read deadline on an accepted connection (idle keep-alive wait or a
+# half-sent request). Clients transparently reopen a closed keep-alive.
+CONN_IDLE_TIMEOUT_S = 300
+LISTEN_BACKLOG = 128
 
 # ---------------------------------------------------------------------------
 # Resource caps (server-enforced; client values are clamped to these)

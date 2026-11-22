@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import socket
 import ssl
 import sys
 import threading
@@ -24,8 +25,9 @@ from typing import Optional
 from .api import LLMACRequestHandler, AppContext
 from .approvals import ApprovalRegistry
 from .constants import (
-    CLI_PATH, CLIENT_DOWNLOAD_URL, CLIENT_REPO_URL, DEFAULT_HOST,
-    DEFAULT_PORT, EXPOSED_HOST, LLMAC_VERSION,
+    CLI_PATH, CLIENT_DOWNLOAD_URL, CLIENT_REPO_URL, CONN_IDLE_TIMEOUT_S,
+    DEFAULT_HOST, DEFAULT_PORT, EXPOSED_HOST, LISTEN_BACKLOG,
+    LLMAC_VERSION, TLS_HANDSHAKE_TIMEOUT_S,
     POLICY_AUTO, POLICY_DESTRUCTIVE, POLICY_STRICT,
 )
 from .events import EventBus
@@ -105,24 +107,109 @@ def build_context(state_store: StateStore, roots: list, agents: list,
     )
 
 
+class _LLMACHTTPServer(ThreadingHTTPServer):
+    """Threaded HTTP server whose TLS handshake runs PER CONNECTION.
+
+    v2.8.3: the old code wrapped the LISTENING socket
+    (``ssl_ctx.wrap_socket(httpd.socket, server_side=True)``). With that
+    arrangement ``accept()`` itself performs the TLS handshake, on the one
+    thread that runs ``serve_forever``, on a socket with no timeout. A
+    single TCP connection that completed the 3-way handshake and then
+    went silent (an agent sandbox that killed its process mid-connect, a
+    proxy/NAT that dropped the flow without a FIN/RST, a port scanner, a
+    half-open ``info``/``orient`` call) parked the accept loop in
+    ``do_handshake()`` forever. Every later client -- whatever command it
+    ran -- then timed out at TCP/TLS level until the host was restarted.
+
+    Now the listening socket stays plain. ``accept()`` returns the moment
+    the kernel has a connection; the worker thread spawned for it does
+    the handshake under a hard deadline, so a stalled peer can only ever
+    burn its own thread for ``TLS_HANDSHAKE_TIMEOUT_S`` seconds.
+    """
+
+    daemon_threads = True
+    request_queue_size = LISTEN_BACKLOG     # default (5) drops bursts
+
+    ssl_context: Optional[ssl.SSLContext] = None
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        # TCP keepalive: reap peers that vanished without FIN/RST so
+        # their (idle) handler threads do not accumulate.
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            if hasattr(socket, "TCP_KEEPIDLE"):
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 15)
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 4)
+        except OSError:
+            pass
+        return sock, addr
+
+    def process_request_thread(self, request, client_address):
+        # Runs on the per-connection worker thread, never the accept loop.
+        if self.ssl_context is not None:
+            try:
+                request.settimeout(TLS_HANDSHAKE_TIMEOUT_S)
+                request = self.ssl_context.wrap_socket(
+                    request, server_side=True,
+                    do_handshake_on_connect=False)
+                request.do_handshake()
+                request.settimeout(None)    # handler applies its own
+            except (OSError, ssl.SSLError, ValueError):
+                # Stalled / garbage / plain-HTTP-on-TLS-port peer. Drop
+                # quietly; nothing was authenticated or logged.
+                try:
+                    request.close()
+                except Exception:
+                    pass
+                return
+        super().process_request_thread(request, client_address)
+
+
 def make_server(host: str, port: int, ctx: AppContext,
                 cert_file: Optional[str] = None,
                 key_file: Optional[str] = None):
     """Create (and optionally TLS-wrap) the threaded HTTP server."""
 
     class _Handler(LLMACRequestHandler):
-        pass
+        # Idle/partial-request deadline per socket read. Applies to a
+        # keep-alive socket waiting for its next request and to a peer
+        # that sends half a request line; it never limits how long an
+        # exec/proc call may RUN (the handler is not reading then).
+        timeout = CONN_IDLE_TIMEOUT_S
 
     _Handler.ctx = ctx
-    httpd = ThreadingHTTPServer((host, port), _Handler)
-    httpd.daemon_threads = True
+    httpd = _LLMACHTTPServer((host, port), _Handler)
 
     if cert_file and key_file:
         ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ssl_ctx.load_cert_chain(certfile=cert_file, keyfile=key_file)
-        httpd.socket = ssl_ctx.wrap_socket(httpd.socket, server_side=True)
+        httpd.ssl_context = ssl_ctx          # handshake per connection
     return httpd
+
+
+def stop_server(srv, timeout: float = 3.0) -> bool:
+    """Stop a server made by make_server() WITHOUT ever blocking the caller
+    (the GUI thread) indefinitely.
+
+    ``srv.shutdown()`` waits for ``serve_forever`` to leave its loop; if
+    that loop is wedged for any reason the caller used to freeze with it
+    (v2.8.3: the GUI froze on Stop after a stalled connection). The
+    shutdown now runs on a helper thread and we wait at most ``timeout``
+    seconds; the listening socket is closed regardless, which also makes
+    a wedged accept fail out. Returns True on a clean shutdown."""
+    t = threading.Thread(target=srv.shutdown, daemon=True,
+                         name="llmac-shutdown")
+    t.start()
+    t.join(timeout)
+    clean = not t.is_alive()
+    try:
+        srv.server_close()
+    except OSError:
+        pass
+    return clean
 
 
 # ---------------------------------------------------------------------------
@@ -405,8 +492,7 @@ def run_headless(roots: list, key: str, host: Optional[str], port: Optional[int]
             print(f"{n} background process(es) left RUNNING (detached; "
                   "they re-attach on the next start — stop them via the "
                   "GUI Procs tab or `llmac proc stop` if unwanted).")
-        srv.shutdown()
-        srv.server_close()
+        stop_server(srv)
         history.append({"type": "close", "mode": "headless",
                         "host": merged_host, "port": merged_port})
         return 0

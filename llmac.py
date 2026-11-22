@@ -81,9 +81,12 @@ try:
     # elsewhere, but guarded here it keeps --version honest forever).
     from core.constants import LLMAC_VERSION as VERSION
 except ImportError:
-    VERSION = "2.8.2"   # standalone release-file fallback — keep in sync
+    VERSION = "2.8.3"   # standalone release-file fallback — keep in sync
 CONNECTIONS_FILE = os.path.join(
     os.path.expanduser("~"), ".llmac", "connections.json")
+# v2.8.3: TCP connect + TLS handshake deadline (seconds), independent of
+# the per-request timeout.
+CONNECT_TIMEOUT = 15.0
 DEFAULT_CONN = "default"
 DEFAULT_PORT = 8765
 
@@ -327,7 +330,26 @@ class Client:
         a transport-level failure (the caller decides whether to retry)."""
         try:
             if self._conn is None:
-                self._conn = self._open_connection(timeout)
+                # v2.8.3: TCP connect + TLS handshake get their OWN short
+                # deadline. A host that accepts the TCP connection but
+                # never answers the handshake used to hold us for the
+                # whole request timeout (130-300 s) -- longer than most
+                # chat tool-call limits, so the agent's sandbox killed
+                # the process mid-connect and left yet another
+                # half-open connection behind.
+                new = self._open_connection(min(timeout, CONNECT_TIMEOUT))
+                new.connect()
+                new.timeout = timeout          # later auto-reconnects
+                if new.sock is not None:
+                    new.sock.settimeout(timeout)   # the REQUEST deadline
+                self._conn = new
+            elif getattr(self._conn, "sock", None) is not None:
+                # Reused keep-alive socket: apply THIS call's deadline,
+                # not the one from whichever call opened it.
+                try:
+                    self._conn.sock.settimeout(timeout)
+                except OSError:
+                    pass
             conn = self._conn          # local: tap may swap self._conn
             with self._tap_lock:
                 self._inflight = True   # v2.8: tap must not peek now

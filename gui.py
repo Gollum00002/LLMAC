@@ -72,6 +72,7 @@ from core.screen import (
 )
 from core.server import (
     build_context, build_prompt_text, fetch_public_ip, make_server,
+    stop_server,
 )
 from core import netinfo
 
@@ -2502,11 +2503,13 @@ class HostWindow(QMainWindow):
             n = self.ctx.procs.stop_all()
             if n:
                 self._log(f"Stopped {n} background process(es).")
-        self.server.shutdown()
-        self.server.server_close()
+        # v2.8.3: bounded stop — never freeze the GUI thread on shutdown().
+        clean = stop_server(self.server)
         self.server = None
         self.server_thread = None
-        self._log("Server stopped.")
+        self._log("Server stopped." if clean else
+                  "Server stopped (accept loop did not exit cleanly; "
+                  "listening socket force-closed).")
         self._set_bind_fields_enabled(True)
         self._refresh_status()
         self._poll_procs()
