@@ -52,7 +52,14 @@ EXEC_TIMEOUT_MAX = 600                     # hard server-side ceiling
 EXEC_OUTPUT_CAP = 1024 * 1024              # 1 MB combined stdout+stderr
 EXEC_HEAD_KEEP = 256 * 1024                # bytes kept from the top
 EXEC_TAIL_KEEP = 256 * 1024                # bytes kept from the bottom
-MAX_CONCURRENT_REQUESTS = 16
+# v2.8.3: 16 -> 64. Each long exec holds a request slot for its whole run
+# and exec WAITERS hold one too; 16 was exhausted by a handful of retries,
+# starving /write and /proc/start. Handler threads are cheap.
+MAX_CONCURRENT_REQUESTS = 64
+# Fail-fast slot waits (seconds); both must stay well under an agent's
+# tool-call limit so a busy host answers 503 + diagnostics, not silence.
+SLOT_WAIT_REQ_S = 3.0
+SLOT_WAIT_EXEC_S = 3.0
 MAX_CONCURRENT_EXEC = 4
 MAX_PROCS = 8                              # background processes
 PROC_LOG_LINES = 500                       # ring-buffer lines per stream

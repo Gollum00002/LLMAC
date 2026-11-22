@@ -32,6 +32,18 @@
   bounded queue; request threads only `put_nowait`, lines are dropped
   (counted) if a destination is stuck. GUI `_log` uses it. Host-only
   change: `llmac.py` and its SHA-256 are unchanged.
+* **Fixed: intermittent "timeouts" on /write, /proc/start and /exec while
+  /health stays instant (slot starvation).** A call that times out on the
+  AGENT's side keeps running on the host and keeps its exec slot (4 total).
+  Agent retries then waited up to 30 s for an exec slot while each holding
+  one of only 16 request slots (15 s wait), so /write and /proc/start
+  starved too, and queued retries later re-ran the command. Reproduced:
+  4 abandoned `sleep 40` + 12 retries -> /write 503 after 15 s, /proc/start
+  14 s, /exec 9 s. Now: request slots 16 -> 64; slot waits 15/30 s -> 3 s
+  (`SLOT_WAIT_REQ_S`, `SLOT_WAIT_EXEC_S`); 503 `exec_busy`/`server_busy`
+  carry `running` (agent, command, running_s) and tell the agent not to
+  resubmit. Same repro afterwards: /write and /proc/start instant, /exec
+  503 + diagnostics in 3 s.
 * Per-connection read deadline (`CONN_IDLE_TIMEOUT_S`, 300 s; idle
   keep-alive or half-sent request), TCP keepalive on accepted sockets, and
   listen backlog 5 -> 128 (bursts of parallel agent calls were dropped).

@@ -144,3 +144,41 @@ class TestAsyncLogSink(unittest.TestCase):
                 break
             time.sleep(0.05)
         self.assertIn("hello", open(p).read())
+
+
+class TestSlotSaturationFailsFast(unittest.TestCase):
+    """Exec slots held by calls the client abandoned must not make
+    /write, /proc/start or /exec silently hang; a busy host answers fast
+    with diagnostics."""
+
+    def test_exec_busy_is_fast_and_diagnostic(self):
+        import threading
+        host = TestHost(tls=False)
+        try:
+            ctx = host.ctx
+            ctx.settings["allow_exec"] = True
+            for a in ctx.auth.agents if hasattr(ctx.auth, "agents") else []:
+                a["perms"].update({"exec": True, "proc": True})
+            host.agents[0]["perms"].update({"exec": True, "proc": True})
+            for _ in range(4):
+                threading.Thread(target=lambda: host.post(
+                    "/exec", {"command": "sleep 6", "cwd": host.root}),
+                    daemon=True).start()
+            time.sleep(1.0)
+            t0 = time.time()
+            resp, status = host.post("/exec", {"command": "echo hi",
+                                               "cwd": host.root})
+            self.assertEqual(status, 503)
+            self.assertEqual(resp["error"], "exec_busy")
+            self.assertLess(time.time() - t0, 6.0)
+            self.assertTrue(resp["running"])
+            self.assertIn("sleep 6", resp["running"][0]["command"])
+            # light/other ops are not starved
+            t0 = time.time()
+            resp, status = host.post("/write", {
+                "path": os.path.join(host.root, "a.txt"), "content": "x"})
+            self.assertEqual(status, 200)
+            self.assertLess(time.time() - t0, 2.0)
+        finally:
+            time.sleep(5.5)
+            host.stop()

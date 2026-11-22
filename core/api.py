@@ -48,6 +48,7 @@ from .constants import (
     MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, MAX_BODY_BYTES,
     MAX_BATCH_OPS, MAX_BATCH_RESPONSE_BYTES, MAX_CONCURRENT_EXEC,
     MAX_CONCURRENT_REQUESTS, MAX_DIFF_BYTES, MAX_READ_BYTES,
+    SLOT_WAIT_EXEC_S, SLOT_WAIT_REQ_S,
     MAX_SEARCH_RESULTS, OP_RING_CAP, OVERVIEW_BUDGET_DEFAULT,
     OVERVIEW_BUDGET_MAX, SESSION_LOG_DEFAULT, SESSION_LOG_MAX,
     OVERVIEW_DEPTH_MAX, OVERVIEW_DOC_HEADS_MAX, OVERVIEW_TREE_ENTRIES,
@@ -369,9 +370,39 @@ class AppContext:
         # Semaphores
         self._req_sem = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
         self._exec_sem = threading.BoundedSemaphore(MAX_CONCURRENT_EXEC)
+        self.active_execs: dict = {}
+        self._active_lock = threading.Lock()
+        self._active_seq = 0
 
-    def acquire(self, timeout: float = 15.0) -> bool:
+    # v2.8.3: waits are SHORT and fail with a diagnostic. They used to be
+    # 15 s (request slot) + 30 s (exec slot) -- longer than an agent's
+    # tool-call limit -- so an agent whose long compiles had timed out
+    # client-side (the host keeps running them and holding their exec
+    # slots) saw every later /write, /proc/start and /exec just "time
+    # out", and its retries piled up behind the orphans.
+    def acquire(self, timeout: float = SLOT_WAIT_REQ_S) -> bool:
         return self._req_sem.acquire(timeout=timeout)
+
+    def exec_register(self, agent: str, command: str) -> int:
+        with self._active_lock:
+            self._active_seq += 1
+            self.active_execs[self._active_seq] = {
+                "agent": agent, "command": command[:120],
+                "started": time.monotonic()}
+            return self._active_seq
+
+    def exec_unregister(self, token: int) -> None:
+        with self._active_lock:
+            self.active_execs.pop(token, None)
+
+    def busy_report(self) -> list:
+        """Currently running execs, oldest first (for 503 messages)."""
+        now = time.monotonic()
+        with self._active_lock:
+            rows = [{"agent": v["agent"], "command": v["command"],
+                     "running_s": int(now - v["started"])}
+                    for v in self.active_execs.values()]
+        return sorted(rows, key=lambda r: -r["running_s"])
 
     def release(self) -> None:
         try:
@@ -380,7 +411,7 @@ class AppContext:
             pass
 
     def acquire_exec(self) -> bool:
-        return self._exec_sem.acquire(timeout=30)
+        return self._exec_sem.acquire(timeout=SLOT_WAIT_EXEC_S)
 
     def release_exec(self) -> None:
         try:
@@ -909,7 +940,10 @@ class LLMACRequestHandler(BaseHTTPRequestHandler):
             if not self.ctx.acquire():
                 self._send_json(503, {
                     "error": "server_busy",
-                    "message": "Too many concurrent operations; retry shortly.",
+                    "message": "Too many concurrent operations; retry "
+                               "shortly. Long-running exec calls hold a "
+                               "slot each (see `running`).",
+                    "running": self.ctx.busy_report(),
                 })
                 return
         try:
@@ -1969,9 +2003,17 @@ def _run_exec(ctx: AppContext, agent: dict, command: str, cwd: str,
                       + ("  (sudo -S, stored password)" if sudo_password
                          else ""), agent=agent)
     if not ctx.acquire_exec():
+        busy = ctx.busy_report()
         raise OpBlocked(503, {
             "error": "exec_busy",
-            "message": "Too many concurrent exec commands; retry."})
+            "message": ("All %d exec slots are in use, retry shortly. "
+                        "A call that timed out on YOUR side keeps running "
+                        "here and keeps its slot until it finishes or "
+                        "hits its own timeout; do not resubmit it -- "
+                        "wait, or run long jobs with `proc start`."
+                        % MAX_CONCURRENT_EXEC),
+            "running": busy})
+    exec_token = ctx.exec_register(agent["name"], command)
     stdout_cap = _BoundedCapture()
     stderr_cap = _BoundedCapture()
     timed_out = False
@@ -2084,6 +2126,7 @@ def _run_exec(ctx: AppContext, agent: dict, command: str, cwd: str,
                 fh_err.close()
             except OSError:
                 pass
+        ctx.exec_unregister(exec_token)
         ctx.release_exec()
 
     stdout = stdout_cap.text()
