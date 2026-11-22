@@ -75,6 +75,7 @@ from core.server import (
     stop_server,
 )
 from core import netinfo
+from core.asynclog import AsyncLogSink
 
 # ---------------------------------------------------------------------------
 # Theme — modern dark UI (v2.2)
@@ -975,6 +976,8 @@ class HostWindow(QMainWindow):
         # Thread-safe queue for log events from server threads.
         import queue
         self._log_queue: queue.Queue = queue.Queue()
+        self._log_sink = AsyncLogSink(
+            os.path.join(self.data_dir, "gui.log"), sys.stderr)
         # In-memory log buffer for rebuilds (capped at 500 lines).
         self._log_buffer: list[dict] = []
         self._log_timer: Optional[QTimer] = None
@@ -3515,14 +3518,11 @@ class HostWindow(QMainWindow):
         ev = {"ts": ts, "level": level, "msg": msg, "agent": agent}
         self._log_queue.put(ev)
         who = f"[{agent}] " if agent else ""
-        sys.stderr.write(f"[{ts}] {level:<8} {who}{msg}\n")
-        sys.stderr.flush()
-        try:
-            with open(os.path.join(self.data_dir, "gui.log"), "a",
-                      encoding="utf-8") as f:
-                f.write(f"[{ts}] {level:<8} {who}{msg}\n")
-        except OSError:
-            pass
+        # v2.8.3: NEVER write stderr/gui.log on the caller's thread. This
+        # runs on HTTP request threads (via op_log); a stalled stderr
+        # (paused console, undrained pipe) or disk used to hang every
+        # /write, /exec and /proc/start while /health stayed instant.
+        self._log_sink.write(f"[{ts}] {level:<8} {who}{msg}\n")
 
     def _on_http_log(self, ev) -> None:
         """Callback for BridgeHTTPRequestHandler logging.

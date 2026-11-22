@@ -20,6 +20,18 @@
   new `core.server.stop_server()` runs shutdown on a helper thread with a
   3 s bound and always closes the listening socket; the GUI Stop button
   and headless Ctrl+C both use it. Tests in `test_v283_stalled_handshake.py`.
+* **Fixed: `/write`, `/exec`, `/proc/start` timing out while `/health` and
+  `/stat` stay instant (host-side, 2.8.3 code).** The GUI log callback ran
+  on the HTTP request thread and wrote synchronously to stderr and
+  `gui.log`. If stderr is undrained (paused/stuck console, full pipe) the
+  write blocks forever; `/write` had already written its file, so it
+  "landed" but never answered, and the stuck thread held Python's stderr
+  lock so every later logging call hung too. Reproduced (write #818 hung
+  after the file landed; later writes all hung). New `core/asynclog.py`
+  `AsyncLogSink`: one daemon writer thread per destination behind a
+  bounded queue; request threads only `put_nowait`, lines are dropped
+  (counted) if a destination is stuck. GUI `_log` uses it. Host-only
+  change: `llmac.py` and its SHA-256 are unchanged.
 * Per-connection read deadline (`CONN_IDLE_TIMEOUT_S`, 300 s; idle
   keep-alive or half-sent request), TCP keepalive on accepted sockets, and
   listen backlog 5 -> 128 (bursts of parallel agent calls were dropped).

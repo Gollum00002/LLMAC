@@ -109,3 +109,38 @@ class TestStopServer(unittest.TestCase):
         self.assertFalse(stop_server(w, timeout=0.5))
         self.assertLess(time.time() - t0, 2.0)
         self.assertTrue(w.closed)
+
+
+class TestAsyncLogSink(unittest.TestCase):
+    """A stuck log destination (undrained stderr, stalled disk) must never
+    block the caller -- that hung /write, /exec, /proc/start on request
+    threads while /health stayed instant."""
+
+    def test_write_never_blocks_on_stuck_stream(self):
+        import threading
+        from core.asynclog import AsyncLogSink
+
+        class Stuck:
+            def __init__(self): self.gate = threading.Event()
+            def write(self, s): self.gate.wait()       # blocks forever
+            def flush(self): pass
+        st = Stuck()
+        sink = AsyncLogSink(stream=st, cap=10)
+        t0 = time.time()
+        for i in range(500):
+            sink.write("line %d\n" % i)
+        self.assertLess(time.time() - t0, 1.0)
+        self.assertGreater(sink.dropped, 0)            # bounded, not unbounded
+        st.gate.set()
+
+    def test_file_sink_still_writes(self):
+        import tempfile
+        from core.asynclog import AsyncLogSink
+        p = os.path.join(tempfile.mkdtemp(), "gui.log")
+        sink = AsyncLogSink(file_path=p)
+        sink.write("hello\n")
+        for _ in range(50):
+            if os.path.exists(p) and "hello" in open(p).read():
+                break
+            time.sleep(0.05)
+        self.assertIn("hello", open(p).read())
