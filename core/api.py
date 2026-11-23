@@ -49,6 +49,7 @@ from .constants import (
     MAX_BATCH_OPS, MAX_BATCH_RESPONSE_BYTES, MAX_CONCURRENT_EXEC,
     MAX_CONCURRENT_REQUESTS, MAX_DIFF_BYTES, MAX_READ_BYTES,
     SLOT_WAIT_EXEC_S, SLOT_WAIT_REQ_S,
+    EXEC_WAIT_MAX_S, EXEC_RESULT_POLL_MAX_S, EXEC_JOB_KEEP, EXEC_JOB_KEEP_S,
     MAX_SEARCH_RESULTS, OP_RING_CAP, OVERVIEW_BUDGET_DEFAULT,
     OVERVIEW_BUDGET_MAX, SESSION_LOG_DEFAULT, SESSION_LOG_MAX,
     OVERVIEW_DEPTH_MAX, OVERVIEW_DOC_HEADS_MAX, OVERVIEW_TREE_ENTRIES,
@@ -372,6 +373,11 @@ class AppContext:
         self._exec_sem = threading.BoundedSemaphore(MAX_CONCURRENT_EXEC)
         self.active_execs: dict = {}
         self._active_lock = threading.Lock()
+        # v2.8.4: detachable exec jobs (see h_exec / h_exec_result).
+        self.exec_jobs: dict = {}
+        self.exec_by_request: dict = {}
+        self._jobs_lock = threading.Lock()
+        self._job_seq = 0
         self._active_seq = 0
 
     # v2.8.3: waits are SHORT and fail with a diagnostic. They used to be
@@ -2189,41 +2195,140 @@ def h_exec(h, ctx: AppContext, agent: dict, p: dict) -> dict:
                               "message": "save and save_stderr must be two "
                                          "different files."})
 
-    ctx.op_log("OP", f"EXEC cwd={cwd} by {agent['name']}  cmd={command!r}",
-              agent=agent)
+    def _go() -> dict:
+        ctx.op_log("OP", f"EXEC cwd={cwd} by {agent['name']}  cmd={command!r}",
+                  agent=agent)
 
-    preflight = _preflight_exec(ctx, agent, command, cwd)
-    if preflight is not None:
-        if preflight.get("rejected"):
-            # A rejected command is a RESULT (HTTP 200, rejected=true),
-            # not a transport error — agents must see the rule that
-            # blocked it.
-            return preflight
-        if preflight.get("needs_sudo_approval"):
-            # v2.4.5: forced gate — ALWAYS prompts (even auto_all),
-            # 2-minute countdown, auto-approve/reject per the security
-            # panel setting. This replaces the normal strict-policy gate
-            # for this command: one approval, with the countdown.
-            # v2.4.6: removals share the flow (the op label carries the
-            # verb); the GUI-set sudo password (if any) is piped to
-            # `sudo -S` at run time — the agent never sees it.
-            verb = preflight.get("sudo_verb") or "install"
-            op = "sudo_install" if verb == "install" else "sudo_remove"
-            maybe_gate(ctx, agent, op, command[:120], command,
-                       forced=True,
-                       expires_in=_sudo_timeout_s(ctx),
-                       timeout_action=_sudo_timeout_action(ctx))
-            ctx.audit(agent=agent["name"], op=f"{op}_approved",
-                      command=command[:500])
-            return _run_exec(ctx, agent, command, cwd, timeout,
-                             save=save, save_err=save_err,
-                             sudo_password=ctx.sudo_password or None)
+        preflight = _preflight_exec(ctx, agent, command, cwd)
+        if preflight is not None:
+            if preflight.get("rejected"):
+                # A rejected command is a RESULT (HTTP 200, rejected=true),
+                # not a transport error — agents must see the rule that
+                # blocked it.
+                return preflight
+            if preflight.get("needs_sudo_approval"):
+                # v2.4.5: forced gate — ALWAYS prompts (even auto_all),
+                # 2-minute countdown, auto-approve/reject per the security
+                # panel setting. This replaces the normal strict-policy gate
+                # for this command: one approval, with the countdown.
+                # v2.4.6: removals share the flow (the op label carries the
+                # verb); the GUI-set sudo password (if any) is piped to
+                # `sudo -S` at run time — the agent never sees it.
+                verb = preflight.get("sudo_verb") or "install"
+                op = "sudo_install" if verb == "install" else "sudo_remove"
+                maybe_gate(ctx, agent, op, command[:120], command,
+                           forced=True,
+                           expires_in=_sudo_timeout_s(ctx),
+                           timeout_action=_sudo_timeout_action(ctx))
+                ctx.audit(agent=agent["name"], op=f"{op}_approved",
+                          command=command[:500])
+                return _run_exec(ctx, agent, command, cwd, timeout,
+                                 save=save, save_err=save_err,
+                                 sudo_password=ctx.sudo_password or None)
 
-    if ctx.settings.get("approval_policy") == POLICY_STRICT:
-        maybe_gate(ctx, agent, "exec", command[:200], command, path=cwd)
+        if ctx.settings.get("approval_policy") == POLICY_STRICT:
+            maybe_gate(ctx, agent, "exec", command[:200], command, path=cwd)
 
-    return _run_exec(ctx, agent, command, cwd, timeout, save=save,
-                     save_err=save_err)
+        return _run_exec(ctx, agent, command, cwd, timeout, save=save,
+                         save_err=save_err)
+
+    wait_s = p.get("wait_s")
+    if wait_s is None:
+        return _go()                      # legacy synchronous path
+    return _exec_detachable(ctx, agent, command, str(p.get("request_id") or "")[:64],
+                            wait_s, _go)
+
+
+def _exec_job_prune(ctx: AppContext) -> None:
+    """Caller holds ctx._jobs_lock. Drop old finished jobs."""
+    now = time.monotonic()
+    done = sorted((j for j in ctx.exec_jobs.values() if j["done"].is_set()),
+                  key=lambda j: j["finished"])
+    drop = [j for j in done if now - j["finished"] > EXEC_JOB_KEEP_S]
+    keep = [j for j in done if j not in drop]
+    drop += keep[:max(0, len(keep) - EXEC_JOB_KEEP)]
+    for j in drop:
+        ctx.exec_jobs.pop(j["id"], None)
+        if j.get("rkey") in ctx.exec_by_request:
+            ctx.exec_by_request.pop(j["rkey"], None)
+
+
+def _exec_job_collect(job: dict, deduped: bool = False) -> dict:
+    if job.get("exc") is not None:
+        raise job["exc"]                  # dispatcher maps it as usual
+    out = dict(job["result"])
+    out["job"] = job["id"]
+    if deduped:
+        out["deduplicated"] = True
+    return out
+
+
+def _exec_job_wait(job: dict, wait: float, deduped: bool = False) -> dict:
+    if job["done"].wait(max(0.0, wait)):
+        return _exec_job_collect(job, deduped)
+    return {
+        "detached": True, "running": True, "job": job["id"],
+        "running_s": int(time.monotonic() - job["started"]),
+        "deduplicated": deduped,
+        "message": ("Command is STILL RUNNING on the host (not killed). "
+                    "Do NOT resubmit it. Fetch the result with "
+                    "`exec-result --job %s` (or POST /exec/result)."
+                    % job["id"])}
+
+
+def _exec_detachable(ctx, agent, command, request_id, wait_s, fn) -> dict:
+    try:
+        wait = min(float(wait_s), float(EXEC_WAIT_MAX_S))
+    except (TypeError, ValueError):
+        raise OpBlocked(400, {"error": "bad_field", "field": "wait_s"})
+    rkey = (agent["name"], request_id) if request_id else None
+    with ctx._jobs_lock:
+        _exec_job_prune(ctx)
+        existing = ctx.exec_jobs.get(ctx.exec_by_request.get(rkey)) \
+            if rkey else None
+        if existing is None:
+            ctx._job_seq += 1
+            job = {"id": "x%d" % ctx._job_seq, "agent": agent["name"],
+                   "command": command[:120], "started": time.monotonic(),
+                   "finished": None, "done": threading.Event(),
+                   "result": None, "exc": None, "rkey": rkey}
+            ctx.exec_jobs[job["id"]] = job
+            if rkey:
+                ctx.exec_by_request[rkey] = job["id"]
+
+            def _work():
+                try:
+                    job["result"] = fn()
+                except BaseException as e:      # re-raised to the waiter
+                    job["exc"] = e
+                finally:
+                    job["finished"] = time.monotonic()
+                    job["done"].set()
+            threading.Thread(target=_work, daemon=True).start()
+    if existing is not None:
+        return _exec_job_wait(existing, wait, deduped=True)
+    return _exec_job_wait(job, wait)
+
+
+@route("POST", "/exec/result")
+def h_exec_result(h, ctx: AppContext, agent: dict, p: dict) -> dict:
+    """v2.8.4: fetch (or wait briefly for) the result of a detached exec."""
+    _exec_allowed(ctx, agent)
+    jid = str(p.get("job") or "")
+    with ctx._jobs_lock:
+        job = ctx.exec_jobs.get(jid)
+    if job is None or job["agent"] != agent["name"]:
+        raise OpBlocked(404, {
+            "error": "exec_job_unknown",
+            "message": "No such exec job for this agent: it expired, the "
+                       "host restarted, or the id is wrong. Check `session "
+                       "status` / re-read the affected paths before "
+                       "re-running anything."})
+    try:
+        wait = min(float(p.get("wait_s", 0)), float(EXEC_RESULT_POLL_MAX_S))
+    except (TypeError, ValueError):
+        wait = 0.0
+    return _exec_job_wait(job, wait)
 
 
 @route("POST", "/proc/start")

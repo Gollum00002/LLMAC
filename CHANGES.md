@@ -1,5 +1,28 @@
 # CHANGES — v2 ("LLM Directory Bridge" → "LLMAC")
 
+## Unreleased (proposed 2.8.4) — calls that outlive the agent's tool limit no longer orphan work
+
+* **Host: detachable `/exec`.** `POST /exec` accepts `wait_s` (cap 60 s). If
+  the command is still running then, the call returns
+  `{detached: true, job, running_s}` and the command KEEPS RUNNING (not
+  killed); its request slot is released. `POST /exec/result {job, wait_s}`
+  (cap 25 s) returns the finished result (same shape as `/exec`, plus
+  `job`) or `detached` again. Jobs are per-agent, kept 30 min / 32 finished
+  jobs, in memory (a host restart drops them -> `exec_job_unknown`). Without
+  `wait_s` the old synchronous path is untouched.
+* **Host: `request_id` dedupe.** Re-sending `/exec` with the same
+  `request_id` attaches to the existing job (`deduplicated: true`) instead
+  of running the command twice -- safe retry after a transport timeout.
+* **Client: `--tool-limit N` / env `LLMAC_TOOL_LIMIT`.** The client arms a
+  watchdog at N-3 s: it closes its sockets (FIN, not a half-open flow),
+  prints what happened, exits 124. `exec` derives `wait_s` from the
+  remaining budget, so a long command detaches (exit 75, prints `job=`)
+  instead of being killed mid-call. New: `exec --wait N`,
+  `exec --request-id ID`, `exec-result --job ID [--wait N]`.
+* `llmac.py` changed -> its SHA-256 changes; republish the release asset.
+* Tests: `tests/test_v284_exec_detach.py` (includes a host that accepts
+  TCP and never answers: client exits 124 before the limit).
+
 ## v2.8.3 — one stalled connection no longer freezes the host
 
 * **Fixed: "TCP timeout, persists until restart" (info / orient / every

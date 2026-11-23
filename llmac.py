@@ -89,6 +89,14 @@ CONNECTIONS_FILE = os.path.join(
 CONNECT_TIMEOUT = 15.0
 DEFAULT_CONN = "default"
 DEFAULT_PORT = 8765
+# v2.8.4: the agent's own tool-call limit (seconds), from --tool-limit or
+# env LLMAC_TOOL_LIMIT. When set, the client (a) exits cleanly BEFORE the
+# limit instead of being killed mid-request (which leaves a half-open
+# connection / orphaned job on the host) and (b) makes `exec` detach
+# server-side so the command outlives the call and is fetched later.
+_T0 = time.monotonic()
+_TOOL_LIMIT = {"s": 0.0}
+_TOOL_MARGIN_S = 3.0
 
 
 # ---------------------------------------------------------------------------
@@ -1869,21 +1877,57 @@ def cmd_exec(args) -> int:
     # silently re-run a side-effecting command (F20).
     c.retry_seconds = 0.0
     timeout = max(1, int(args.timeout or 300))
+    payload = {"command": args.command, "cwd": args.cwd or "",
+               "timeout": timeout,
+               "save": getattr(args, "save", "") or "",
+               "save_stderr": getattr(args, "save_stderr", "") or ""}
+    # v2.8.4: soft deadline. --wait N, or derived from the tool limit.
+    wait = getattr(args, "wait", None)
+    if wait is None and _TOOL_LIMIT["s"] > 0:
+        wait = max(1.0, _tool_budget_left() - 3.0)
+    http_timeout = timeout + 30
+    if wait is not None:
+        import uuid
+        payload["wait_s"] = float(wait)
+        payload["request_id"] = (getattr(args, "request_id", "")
+                                 or uuid.uuid4().hex)
+        http_timeout = min(http_timeout, float(wait) + 10)
     # Couple the HTTP timeout to the exec timeout (+ margin) so the client
     # stops reporting 'transport failed' at 30s while the command runs on.
-    resp, status = c.post("/exec",
-                          {"command": args.command, "cwd": args.cwd or "",
-                           "timeout": timeout,
-                           "save": getattr(args, "save", "") or "",
-                           "save_stderr": getattr(args, "save_stderr", "")
-                           or ""},
-                          timeout=timeout + 30)
+    resp, status = c.post("/exec", payload, timeout=http_timeout)
     if status == 0:
         print("ERROR: the transport failed before the result arrived — the "
               "command may still be RUNNING or COMPLETED server-side. Do "
               "NOT blindly retry side-effecting commands; check `events` or "
               "re-read the affected paths first.", file=sys.stderr)
         return 3
+    return _emit_exec_response(resp, args)
+
+
+def cmd_exec_result(args) -> int:
+    """v2.8.4: fetch / wait for the result of a detached exec job."""
+    c = _client_from_args(args)
+    rc = _require_key(c)
+    if rc:
+        return rc
+    c.retry_seconds = 0.0
+    wait = float(args.wait)
+    wait = min(wait, max(0.0, _tool_budget_left() - 3.0))
+    resp, status = c.post("/exec/result", {"job": args.job, "wait_s": wait},
+                          timeout=wait + 10)
+    if status == 0:
+        return _err(resp.get("message", "connection failed"), 3)
+    return _emit_exec_response(resp, args)
+
+
+def _emit_exec_response(resp, args) -> int:
+    if resp.get("detached"):
+        print(json.dumps(_with_inbox(resp), ensure_ascii=False)
+              if getattr(args, "json_out", False) else
+              "[detached] job=%s still running (%ss). %s"
+              % (resp.get("job"), resp.get("running_s"),
+                 resp.get("message", "")), file=sys.stdout)
+        return 75     # EX_TEMPFAIL: not done yet, not a failure
     if getattr(args, "json_out", False):
         # Machine-readable result for scripted use (F3/F6).
         print(json.dumps(_with_inbox({"returncode": resp.get("returncode"),
@@ -2686,6 +2730,52 @@ def cmd_probe(args) -> int:
 # Argument parsing
 # ---------------------------------------------------------------------------
 
+def _tool_budget_left() -> float:
+    """Seconds left before our self-imposed deadline (inf if unset)."""
+    lim = _TOOL_LIMIT["s"]
+    if lim <= 0:
+        return float("inf")
+    return lim - _TOOL_MARGIN_S - (time.monotonic() - _T0)
+
+
+def _start_watchdog() -> None:
+    """Exit cleanly at the self-imposed deadline: close every live socket
+    (FIN, not a half-open flow) and say what that means."""
+    lim = _TOOL_LIMIT["s"]
+    if lim <= 0:
+        return
+
+    def _fire():
+        try:
+            sys.stderr.write(
+                "\n[llmac] self-deadline hit (%.0fs, tool limit %.0fs): "
+                "stopped before the tool call would be killed. The "
+                "operation may still be running or may have completed on "
+                "the host. Read-only ops: just re-run. exec: use "
+                "`exec-result --job ID` if you have one, else check "
+                "`session status` BEFORE retrying side-effecting "
+                "commands.\n" % (lim - _TOOL_MARGIN_S, lim))
+            sys.stderr.flush()
+        except Exception:
+            pass
+        for c in list(_CLIENT_CACHE.values()):
+            try:
+                if c._conn is not None:
+                    if getattr(c._conn, "sock", None) is not None:
+                        try:
+                            c._conn.sock.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+                    c._conn.close()
+            except Exception:
+                pass
+        os._exit(124)
+
+    t = threading.Timer(max(0.5, lim - _TOOL_MARGIN_S), _fire)
+    t.daemon = True
+    t.start()
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="llmac.py",
@@ -2712,6 +2802,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retry", type=int, default=0,
                    help="Keep retrying transport failures for N seconds "
                         "(survives host restarts).")
+    p.add_argument("--tool-limit", type=float, default=None,
+                   dest="tool_limit",
+                   help="v2.8.4: your tool-call wall-clock limit in "
+                        "seconds (env LLMAC_TOOL_LIMIT). The client then "
+                        "exits cleanly before it and exec detaches "
+                        "server-side instead of being killed mid-call.")
     p.add_argument("--tap", action="store_true",
                    help="v2.8: watch the connection while commands run "
                         "and alert on server data with no request "
@@ -2964,8 +3060,25 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--i-know", action="store_true", dest="i_know",
                     help="Skip the pre-flight lint for local-shell "
                          "substitution hazards (A3).")
+    sp.add_argument("--wait", type=float, default=None,
+                    help="v2.8.4: soft deadline (s). If the command is "
+                         "still running then, the call returns a job id "
+                         "and the command KEEPS RUNNING; fetch with "
+                         "`exec-result`. Implied by --tool-limit.")
+    sp.add_argument("--request-id", default="", dest="request_id",
+                    help="v2.8.4: stable id; re-sending the same id "
+                         "attaches to the running/finished job instead "
+                         "of starting a second copy (safe retries).")
     sp.add_argument("--verbose", action="store_true")
     sp.set_defaults(func=cmd_exec)
+
+    sp = sub.add_parser("exec-result", help="v2.8.4: result of a detached "
+                                            "exec job.")
+    sp.add_argument("--job", required=True)
+    sp.add_argument("--wait", type=float, default=10.0,
+                    help="Seconds to wait for completion (host caps at 25).")
+    sp.add_argument("--json", action="store_true", dest="json_out")
+    sp.set_defaults(func=cmd_exec_result)
 
     sp = sub.add_parser("proc", help="Background processes.")
     sp.add_argument("proc_cmd", choices=["start", "list", "logs", "stop"])
@@ -3178,6 +3291,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    try:
+        lim = args.tool_limit if args.tool_limit is not None else float(
+            os.environ.get("LLMAC_TOOL_LIMIT") or 0)
+    except ValueError:
+        lim = 0.0
+    _TOOL_LIMIT["s"] = max(0.0, lim)
+    _start_watchdog()
     return _call_with_inbox_notice(args.func, args)
 
 

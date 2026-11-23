@@ -61,6 +61,14 @@ MAX_CONCURRENT_REQUESTS = 64
 SLOT_WAIT_REQ_S = 3.0
 SLOT_WAIT_EXEC_S = 3.0
 MAX_CONCURRENT_EXEC = 4
+# v2.8.4: detachable exec. A client may pass wait_s to /exec; if the
+# command is still running after that long, the request returns
+# {detached, job} and the command keeps running, its result retrievable
+# via POST /exec/result. Keeps agent tool-call limits from orphaning work.
+EXEC_WAIT_MAX_S = 60                       # cap on /exec wait_s
+EXEC_RESULT_POLL_MAX_S = 25                # cap on /exec/result wait_s
+EXEC_JOB_KEEP = 32                         # finished jobs retained
+EXEC_JOB_KEEP_S = 1800                     # ... and for this long
 MAX_PROCS = 8                              # background processes
 PROC_LOG_LINES = 500                       # ring-buffer lines per stream
 DELETE_CONFIRM_THRESHOLD = 20              # files beyond which confirm=true is required

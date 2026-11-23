@@ -480,3 +480,15 @@ connection block includes a `SHA256:...` fingerprint — pass it via
 `--fp` (or it gets pinned on first connect). If a later connection
 reports a fingerprint mismatch, STOP — that could be a machine-in-the-
 middle. Tell the human.
+
+
+## Tool-call limits (v2.8.4)
+
+If your tool kills calls after N seconds (often ~20 s), set
+`LLMAC_TOOL_LIMIT=N` (or pass `--tool-limit N`). The client then exits
+cleanly before the limit, and `exec` detaches instead of being killed: you
+get `job=ID` (exit 75) and the command keeps running. Fetch it with
+`exec-result --job ID --wait 10`. For side-effecting commands pass a stable
+`--request-id` so a retry attaches to the running job instead of running it
+twice. Never blind-retry after exit 3/124: check `exec-result` or
+`session status` first. Long builds still belong in `proc start`.
