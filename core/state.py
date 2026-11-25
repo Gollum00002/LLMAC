@@ -101,6 +101,9 @@ def default_settings() -> dict:
         "screen_shots_enabled": True,
         "screen_observe_enabled": False,
         "screen_input_enabled": False,
+        # v2.8.5: approval mode per class — per_shot | session | always
+        "screen_shots_approval": "per_shot",
+        "screen_input_approval": "per_shot",
         "screen_shot_dir": DEFAULT_SHOT_DIR,
         "screen_input_max_minutes": SCREEN_INPUT_MAX_MINUTES_DEFAULT,
         "screen_input_max_events": SCREEN_INPUT_MAX_EVENTS_DEFAULT,

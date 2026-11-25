@@ -259,7 +259,7 @@ class TestTabSourcePins(unittest.TestCase):
             tail = self.src[m.end():m.end() + 160]
             lm = re.search(r'"(\w+)"\)', tail)
             labels.append(lm.group(1) if lm else None)
-        self.assertEqual(labels, ["Overview", "Agents", "Sessions",
+        self.assertEqual(labels, ["Overview", "Agents", "Inbox",
                                   "Approvals", "Processes", "Security",
                                   "Log"])
 

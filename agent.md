@@ -428,6 +428,13 @@ by measured impact.
     unmappable character when it refuses. Screen/input ops are NOT
     batchable in v1 — approvals and the GUI-thread capture bridge do
     not belong inside a batch.
+    (v2.8.5) The host may be set to ask each time, ask once per session,
+    or always approve for screenshots and input injection — do not
+    assume an op needs (or skips) approval. The host AUTOMATICALLY posts
+    an `[INPUT CONTROL]` note to the human's Inbox when you take input
+    injection control (and when that session closes). It is not
+    optional and does not depend on you, but also tell the human in
+    your own words what you are about to do with the mouse/keyboard.
 
 ### Exec `--json` schema (v2.3.1, F3)
 

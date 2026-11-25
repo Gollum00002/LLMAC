@@ -44,6 +44,12 @@ class AgentSession:
         self._inbox_seq = 0          # monotonic per-agent message counter
         self.inbox_seen = 0           # highest seq the agent has consumed
         self.last_inbox_ts = None     # persists after consumption (sidebar)
+        # v2.8.5: agent->human unseen counter for the GUI Inbox tab
+        # badge. `_note_seq` counts every note ever added (the capped
+        # list can drop old ones); `notes_seen_by_human` is the
+        # watermark the GUI advances when the human has the thread open.
+        self._note_seq = 0
+        self.notes_seen_by_human = 0
 
     def record(self, op: str, detail: str = "", path: str = "",
                kind: str = "") -> None:
@@ -77,7 +83,16 @@ class AgentSession:
     def add_note(self, text: str) -> None:
         if len(self.notes) >= SESSION_NOTES_CAP:
             del self.notes[: len(self.notes) - SESSION_NOTES_CAP + 1]
-        self.notes.append({"ts": _now(), "text": text[:4000]})
+        self._note_seq += 1
+        self.notes.append({"seq": self._note_seq, "ts": _now(),
+                           "text": text[:4000]})
+
+    def unseen_notes(self) -> int:
+        """Agent->human messages the human has not seen yet."""
+        return max(0, self._note_seq - self.notes_seen_by_human)
+
+    def mark_notes_seen(self) -> None:
+        self.notes_seen_by_human = self._note_seq
 
     # ---- v2.5.0 (ASK-001): user->agent inbox --------------------------
 
@@ -192,8 +207,18 @@ class SessionRegistry:
                 "op_count": len(s.ops),
                 "note_count": len(s.notes),
                 "unread": s.unread_count(),
+                "unseen_notes": s.unseen_notes(),
                 "last_inbox_ts": s.last_inbox_ts,
             } for s in self._sessions.values()]
+
+    def unseen_total(self) -> int:
+        """Agent messages the human has not seen, across all agents —
+        the Inbox tab badge."""
+        with self._lock:
+            return sum(s.unseen_notes() for s in self._sessions.values())
+
+    def mark_seen(self, agent: str) -> None:
+        self.get(agent).mark_notes_seen()
 
     def thread(self, agent: str, limit: int = 200) -> list:
         """The merged transcript the GUI chat pane renders: agent notes +

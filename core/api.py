@@ -2593,6 +2593,14 @@ _MOUSE_ACTIONS = ("move", "click", "doubleclick", "drag", "scroll")
 _MOUSE_BUTTONS = ("left", "middle", "right")
 
 
+# v2.8.5: which setting holds the approval mode for each gated class.
+# screen_observe is deliberately absent: it keeps the legacy behaviour.
+_SCREEN_APPROVAL_MODE_KEYS = {
+    "screen_shot": "screen_shots_approval",
+    "screen_input": "screen_input_approval",
+}
+
+
 def _screen_gate(ctx: AppContext, agent: dict, op: str, summary: str,
                  detail: str = "") -> None:
     """Screen-class approvals are FORCED: they prompt under EVERY policy
@@ -2603,6 +2611,18 @@ def _screen_gate(ctx: AppContext, agent: dict, op: str, summary: str,
     time-boxed path-scoped grants are deliberately NOT consulted:
     screen ops have no path scope, and a disk-persisted screen grant
     would survive restarts, which the plan forbids."""
+    # v2.8.5: per-class approval mode (settings screen_shots_approval /
+    # screen_input_approval): per_shot (default) | session | always.
+    mode_key = _SCREEN_APPROVAL_MODE_KEYS.get(op)
+    mode = "per_shot"
+    if mode_key:
+        mode = str(ctx.settings.get(mode_key, "per_shot") or "per_shot")
+        if mode not in ("per_shot", "session", "always"):
+            mode = "per_shot"     # unknown value fails CLOSED to prompting
+    if mode == "always":
+        ctx.op_log("WARN", f"AUTO-APPROVED {op} (mode 'always', agent "
+                           f"{agent['name']}): {summary}", agent=agent)
+        return
     if agent["name"] in (ctx.screen_session_grants.get(op) or ()):
         ctx.op_log("OK", f"SESSION GRANT covers {op} "
                           f"(agent {agent['name']})", agent=agent)
@@ -2613,6 +2633,14 @@ def _screen_gate(ctx: AppContext, agent: dict, op: str, summary: str,
     status = ctx.approvals.wait(aid, APPROVAL_WAIT_MAX)
     if status == "approved":
         ctx.op_log("OK", f"APPROVAL GRANTED [{aid}] {op}", agent=agent)
+        if mode == "session":
+            # 'session' mode: the first approval covers this agent until
+            # the app restarts (memory-only; every op still logged).
+            ctx.screen_session_grants.setdefault(op, set()).add(
+                agent["name"])
+            ctx.op_log("OK", f"SESSION GRANT recorded for {op} (agent "
+                             f"{agent['name']}) — until app restart",
+                       agent=agent)
         return
     if status == "pending":
         raise OpBlocked(202, {
@@ -2848,6 +2876,16 @@ def _drive_gate(ctx: AppContext, agent: dict, summary: str) -> dict:
         ctx.events.emit("drive_session", {
             "agent": agent["name"], "state": "open",
             "max_events": max_events, "max_minutes": max_minutes})
+        # v2.8.5: the AI ALWAYS announces input control in the human's
+        # Inbox — host-enforced, not left to the agent's discipline, so
+        # it also fires when approval mode is 'always'.
+        ctx.sessions.note(
+            agent["name"],
+            f"[INPUT CONTROL] I have taken input injection control "
+            f"(mouse/keyboard) — first action: {summary}. Limits: "
+            f"{max_events} events / {max_minutes:g} min. You can disarm "
+            f"me any time with the red banner.")
+        ctx.events.emit("note", {"agent": agent["name"]})
         sess, reason = ctx.screen_drive.authorize(agent["name"])
     if reason in ("events", "time"):
         cap = ("screen_input_max_events" if reason == "events"
@@ -2865,6 +2903,11 @@ def _drive_gate(ctx: AppContext, agent: dict, summary: str) -> dict:
                            f"dropped", agent=agent)
         ctx.events.emit("drive_session", {
             "agent": agent["name"], "state": "closed", "reason": reason})
+        ctx.sessions.note(
+            agent["name"],
+            f"[INPUT CONTROL] My input-control session was CLOSED "
+            f"({which} reached). I no longer control mouse/keyboard.")
+        ctx.events.emit("note", {"agent": agent["name"]})
         raise OpBlocked(403, {
             "error": "drive_cap_exceeded",
             "message": f"The drive session's {which} ({cap}) was "

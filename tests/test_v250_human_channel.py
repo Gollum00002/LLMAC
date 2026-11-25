@@ -263,7 +263,7 @@ class TestGUISourcePins(unittest.TestCase):
         with open(GUI_SRC, encoding="utf-8") as f:
             src = f.read()
         for marker in ("chat_input", "chat_view", "chat_agent_list",
-                       "_send_chat_message", "_poll_chat", "Sessions"):
+                       "_send_chat_message", "_poll_chat", "Inbox"):
             self.assertIn(marker, src)
 
     def test_message_event_documented(self):

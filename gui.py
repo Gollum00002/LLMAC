@@ -937,6 +937,8 @@ class HostWindow(QMainWindow):
         self.settings.setdefault("screen_shots_enabled", True)
         self.settings.setdefault("screen_observe_enabled", False)
         self.settings.setdefault("screen_input_enabled", False)
+        self.settings.setdefault("screen_shots_approval", "per_shot")
+        self.settings.setdefault("screen_input_approval", "per_shot")
         self.settings.setdefault("screen_shot_dir", DEFAULT_SHOT_DIR)
         self.settings.setdefault("screen_input_max_minutes", 10)
         self.settings.setdefault("screen_input_max_events", 500)
@@ -1172,8 +1174,11 @@ class HostWindow(QMainWindow):
             self._wrap_scroll(self._build_agents_tab()), "Agents")
         # v2.5.0 (ASK-001/002): the human channel — live agent sessions,
         # the merged notes+messages transcript, mid-run messaging.
+        # v2.8.5: renamed Sessions -> Inbox (badge: unseen agent msgs).
         self.TAB_SESSIONS = self.tabs.addTab(
-            self._wrap_scroll(self._build_sessions_tab()), "Sessions")
+            self._wrap_scroll(self._build_sessions_tab()), "Inbox")
+        self.TAB_INBOX = self.TAB_SESSIONS
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         self.TAB_APPROVALS = self.tabs.addTab(
             self._wrap_scroll(self._build_approvals_tab()), "Approvals")
         self.TAB_PROCS = self.tabs.addTab(
@@ -1712,7 +1717,7 @@ class HostWindow(QMainWindow):
             "(v2.7.0)")
         row_s = QHBoxLayout()
         self.screen_shots_check = QCheckBox(
-            "Screenshots (per-shot approval)")
+            "Screenshots")
         self.screen_shots_check.setChecked(
             bool(self.settings.get("screen_shots_enabled", True)))
         self.screen_shots_check.toggled.connect(
@@ -1736,6 +1741,28 @@ class HostWindow(QMainWindow):
         row_s.addWidget(self.screen_input_check)
         row_s.addStretch()
         cv2.addLayout(row_s)
+        # v2.8.5: approval mode per class
+        mrow = QHBoxLayout()
+        self.screen_approval_combos = {}
+        for label, key in (("Screenshot approval:", "screen_shots_approval"),
+                           ("Input injection approval:",
+                            "screen_input_approval")):
+            mrow.addWidget(QLabel(label))
+            combo = QComboBox()
+            for text, val in (("Ask each time", "per_shot"),
+                              ("Ask once per session", "session"),
+                              ("Always approve", "always")):
+                combo.addItem(text, val)
+            cur = str(self.settings.get(key, "per_shot"))
+            idx = combo.findData(cur)
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+            combo.currentIndexChanged.connect(
+                lambda _i, k=key, c=combo:
+                self._on_screen_approval_mode(k, c.currentData()))
+            self.screen_approval_combos[key] = combo
+            mrow.addWidget(combo)
+        mrow.addStretch()
+        cv2.addLayout(mrow)
         self.screen_input_warn = QLabel(
             "Injected input reaches XWayland clients (games, Steam, "
             "Proton) — NOT native Wayland windows in v1. Drive "
@@ -1782,9 +1809,12 @@ class HostWindow(QMainWindow):
         crow.addStretch()
         cv2.addLayout(crow)
         sdesc = QLabel(
-            "Screenshots and observe are approval-gated per call (the "
-            "approval card can grant a class for this session — it "
-            "dies with the app). Input injection is OFF until enabled "
+            "Approval mode per class: Ask each time (default), Ask once "
+            "per session (first approval covers that agent until the app "
+            "restarts) or Always approve. Observe is approval-gated per "
+            "call (the approval card can grant it for this session). "
+            "For input injection, 'each time' means each drive session. "
+            "Input injection is OFF until enabled "
             "here, then bounded: an approved op opens a drive session "
             "with these caps; the always-on-top banner disarms it in "
             "one click; on X11 any physical input disarms it too.")
@@ -2535,7 +2565,7 @@ class HostWindow(QMainWindow):
 
         # == Human channel card ==
         ccard, cv = self._card(
-            "Live sessions",
+            "Inbox",
             "talk to a working agent mid-run — your messages land in "
             "its inbox; replies are its session notes")
         split = QHBoxLayout()
@@ -2626,6 +2656,14 @@ class HostWindow(QMainWindow):
         except Exception:
             return
         prev = self._chat_agent
+        # v2.8.5: with the Inbox tab open, the selected agent's thread
+        # is on screen — its messages count as seen.
+        if prev and self.tabs.currentIndex() == self.TAB_INBOX:
+            try:
+                self.ctx.sessions.mark_seen(prev)
+                snap = self.ctx.sessions.agents_snapshot()
+            except Exception:
+                pass
         self.chat_agent_list.blockSignals(True)
         self.chat_agent_list.clear()
         for s in sorted(snap, key=lambda x: x["agent"]):
@@ -2639,6 +2677,8 @@ class HostWindow(QMainWindow):
                 pass
             if s.get("unread"):
                 label += f", {s['unread']} unread"
+            if s.get("unseen_notes"):
+                label += f", {s['unseen_notes']} new"
             label += ")"
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, s["agent"])
@@ -2662,6 +2702,27 @@ class HostWindow(QMainWindow):
         elif prev is None and self.chat_agent_list.count():
             self.chat_agent_list.setCurrentRow(0)
         self._refresh_chat_thread()
+        self._update_inbox_badge()
+
+    def _on_tab_changed(self, _idx: int) -> None:
+        """Entering the Inbox tab clears the badge for the open thread."""
+        if self.ctx is not None:
+            self._poll_chat()
+
+    def _update_inbox_badge(self) -> None:
+        """v2.8.5: 'Inbox (N)' = agent messages not yet seen, shown in
+        amber so it is noticeable from any other tab."""
+        try:
+            n = self.ctx.sessions.unseen_total() if self.ctx else 0
+        except Exception:
+            return
+        if n == getattr(self, "_inbox_n", None):
+            return
+        self._inbox_n = n
+        self.tabs.setTabText(self.TAB_INBOX,
+                             f"Inbox ({n})" if n else "Inbox")
+        self.tabs.tabBar().setTabTextColor(
+            self.TAB_INBOX, QColor(C_AMBER) if n else QColor())
 
     def _chat_agent_selected(self, current, _previous) -> None:
         if current is None:
@@ -3163,6 +3224,22 @@ class HostWindow(QMainWindow):
         self._save_state(event_type="screen_settings_change",
                          payload={key: value})
         self._log(f"Screen setting {key} = {value!r} (persisted).")
+
+    def _on_screen_approval_mode(self, key: str, mode: str) -> None:
+        """v2.8.5: change an approval mode. Existing until-restart
+        grants for that class are cleared so the new mode applies
+        cleanly (switching to 'Ask each time' really asks each time)."""
+        self._save_screen_setting(key, mode)
+        op = {"screen_shots_approval": "screen_shot",
+              "screen_input_approval": "screen_input"}.get(key)
+        if op and self.ctx is not None:
+            self.ctx.screen_session_grants.pop(op, None)
+        if mode == "always":
+            self._log(f"{key} = ALWAYS APPROVE — requests of this class "
+                      f"run without asking (still op-logged"
+                      + ("; the agent announces input control in the "
+                         "Inbox" if op == "screen_input" else "")
+                      + ").", "WARN")
 
     def _on_screen_input_toggled(self, on: bool) -> None:
         self._save_screen_setting("screen_input_enabled", bool(on))

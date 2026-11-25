@@ -1,5 +1,30 @@
 # CHANGES — v2 ("LLM Directory Bridge" → "LLMAC")
 
+## Unreleased (proposed 2.8.5) — approval modes, Inbox tab, input-control notice
+
+* **Settings (Security → Screen access): approval mode per class** for
+  screenshots and for input injection: *Ask each time* (default, the old
+  behaviour) / *Ask once per session* (first approval covers that agent
+  until the app restarts, memory-only) / *Always approve* (no prompt; each
+  request is still op-logged at WARN). Settings `screen_shots_approval`,
+  `screen_input_approval` (`per_shot` | `session` | `always`; unknown
+  values fail closed to prompting). Changing a mode clears existing
+  until-restart grants for that class. For input injection "each time"
+  means each *drive session* (caps still bound every session). Screen
+  observe (OCR) is unchanged. The enable switches still come first: the
+  modes only decide whether a request needs a click.
+* **GUI: the "Sessions" tab is now "Inbox"**, with an amber
+  `Inbox (N)` badge counting agent messages (session notes) you have not
+  seen yet, visible from any tab. Messages in the thread you have open on
+  the Inbox tab count as seen; the sidebar shows `N new` per agent.
+* **Host: input control is always announced.** When an agent opens an
+  input-injection drive session, the host posts an `[INPUT CONTROL]` note
+  to that agent's Inbox thread (and again when the session is closed by a
+  cap). Enforced by the host, so it also fires in *Always approve* mode.
+* `llmac.py` is unchanged (its SHA-256 stays the same); `agent.md` notes
+  the new behaviour.
+* Tests: `tests/test_v285_approval_modes_inbox.py`.
+
 ## Unreleased (proposed 2.8.4) — calls that outlive the agent's tool limit no longer orphan work
 
 * **Host: detachable `/exec`.** `POST /exec` accepts `wait_s` (cap 60 s). If
