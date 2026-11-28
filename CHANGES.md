@@ -1,5 +1,56 @@
 # CHANGES — v2 ("LLM Directory Bridge" → "LLMAC")
 
+## Unreleased (proposed 2.8.6) — auto-approve that stays approved, Inbox scroll, safer reads
+
+* **Input injection: a capped drive session renews itself instead of
+  re-prompting.** With input injection set to *Ask once per session* (live
+  grant) or *Always approve*, hitting the drive session's time or event cap
+  used to CLOSE the session and DROP the approval, so the agent's next
+  request prompted again even though auto-approval was on. Now the session
+  is renewed in place — loudly: a WARN op-log line, a `drive_session`
+  `renewed` event, and an `[INPUT CONTROL] … RENEWED` note in the Inbox —
+  and the op proceeds. *Ask each time* is unchanged. New setting
+  `screen_input_auto_renew` (default on; Security → Screen access checkbox)
+  restores the strict pre-2.8.6 behaviour. A human **disarm** (red banner /
+  X11 physical input) now also revokes the until-restart input grant, so
+  auto-renewal can't hand control straight back after you pull it (under
+  *Always approve*, which is a standing setting, change the mode to stop an
+  agent). `tests/test_v285…` `test_session_mode_regrant_after_cap_exceeded`
+  encoded the old behaviour and was rewritten as the opt-out test.
+* **GUI: the Inbox thread no longer jumps to the first message.**
+  `setHtml()` snaps the view to the top and the old code only undid that
+  when you were already at the bottom, so reading older messages got
+  yanked up every time a new one arrived (a live search also re-jumped the
+  view every second). Your scroll position is now kept; you follow new
+  messages only if you were at the bottom; a newly opened thread starts at
+  the latest message. The agent list also keeps its scroll position.
+* **Host: reads can no longer overrun a tight tool-call limit.**
+  * Default response cap (`READ_DEFAULT_BYTES`, 64 KB) for a read with no
+    `limit` / `max_bytes` / `raw`: line-aligned, `truncated` +
+    `next_offset` + `soft_capped` + a `hint`. `raw: true` or an explicit
+    `max_bytes`/`limit` still go up to the 5 MB per-call ceiling.
+  * Line-range reads (`from_line`/`to_line`) now STREAM the file: any file
+    size (it used to read ≤5 MB and slice, so lines past 5 MB were
+    unreachable), memory bounded by the window, response capped at a line
+    boundary (`truncated`, `next_line`, `hint`; a single over-long line is
+    cut and flagged `line_cut`). `total_lines` is a fast newline count
+    (`null` above 64 MB). Applies to `batch` read ops too.
+  * `limit` without `offset` is now honoured (it was silently ignored, so
+    `read --limit N` returned the whole file); a slice that ends mid
+    multi-byte character is trimmed instead of being mistaken for binary.
+* **Client (`llmac.py` — its SHA-256 CHANGES, republish the release):**
+  smart truncation of an already host-capped read shows the HEAD only and
+  prints the exact `--offset` to continue (a "tail" of a partial chunk
+  would have been misleading); `--raw` to the terminal is bounded to
+  256 KB (`--to FILE` always saves the whole file); capped line windows
+  print `continue with --lines N-M`.
+* Docs: `agent.md` read table, efficiency rules and screen-channel notes.
+* Tests: `tests/test_v286_renew_reads_scroll.py` (36 tests). Two older
+  tests were adapted to the new behaviour: `test_session_mode_regrant_after_cap_exceeded`
+  (now the opt-out test) and `test_response_cap` (batch reads pass `raw`,
+  since unsized reads are now 64 KB each). `test_sandbox` has 3 failures that
+  also occur on the untouched 2.8.5 tree.
+
 ## Unreleased (proposed 2.8.5) — approval modes, Inbox tab, input-control notice
 
 * **Settings (Security → Screen access): approval mode per class** for

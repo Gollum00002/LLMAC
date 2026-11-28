@@ -225,7 +225,9 @@ class TestBatch(unittest.TestCase):
 
     def test_response_cap(self):
         make_tree(self.host.root, {"huge.txt": "y" * (2 * 1024 * 1024)})
-        ops = [{"op": "read",
+        # v2.8.6: unsized reads are capped at 64 KB each now, so ask for
+        # the full 2 MB per op (raw) to exercise the AGGREGATE batch cap.
+        ops = [{"op": "read", "raw": True,
                 "path": os.path.join(self.host.root, "huge.txt")}] * 5
         resp, status = self.host.post("/batch", {"ops": ops})
         self.assertEqual(status, 200)

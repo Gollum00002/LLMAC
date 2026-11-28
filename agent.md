@@ -142,9 +142,9 @@ depends on host-side state at all.
 | `tree [--depth N] [--path P]` | depth-capped tree (skips node_modules/.git/…) | `ls` crawling |
 | `search --query Q [--glob '*.py'] [--regex] [--context 2]` | grep with caps | read-many-files |
 | `search --name '*.md'` | find files by glob | `ls` crawling |
-| `read --path P` | whole file (≤5MB; large text files are smart-truncated to head+tail unless `--raw`) | — |
-| `read --path P --lines 10-50 [--numbered]` | line range | whole-file reads |
-| `read --path P --offset N --limit M` | byte range (binary-safe) | whole-file reads |
+| `read --path P` | the file, up to a default cap (~64 KB; v2.8.6). Bigger files come back as the first ~200 lines + a `[smart-truncated]` note that says exactly where to continue. `--raw` raises it to 256 KB on the terminal; `--to FILE` saves a whole file | — |
+| `read --path P --lines 10-50 [--numbered]` | line range — streams the file, so it works on files of ANY size; the response is capped (~64 KB) at a line boundary and prints `continue with --lines N-M` when cut (v2.8.6) | whole-file reads |
+| `read --path P --offset N --limit M` | byte range (binary-safe); `--limit` now works without `--offset` too (v2.8.6) | whole-file reads |
 | `read --path P --hex [--offset N] [--limit M]` | server-rendered xxd-style dump (offset/hex/ascii columns, absolute offsets; default 512 B, cap 4096 B per slice — the RE primitive for binary blobs, no exec needed; v2.4.7) | exec xxd/od |
 | `read --path P --hex --find-hex 4d5a` / `--find-text "MZ"` `[--offset N] [--max-hits K]` | scan a binary for a byte pattern or literal text; every hit comes back with its ABSOLUTE offset + rendered hex context; `next_offset` pages the scan, then `read --hex --offset` GOTOs any byte; default 25 hits, server cap 100 (v2.4.8) | exec xxd + grep loops |
 | `write --path P` (stdin / `--content`) | whole-file write | — |
@@ -273,8 +273,13 @@ by measured impact.
 2. **Range your reads** — `--lines 10-50` gave 520 tokens where a whole
    `gui.py` read cost 24,500: **47×**. `read` now smart-truncates big
    text files (head 200 + tail 50 + a `[smart-truncated]` stderr marker)
-   so an unwitting big read can't blow your context; pass `--raw` for
-   the full text or `--to` to save it.
+   so an unwitting big read can't blow your context. Since v2.8.6 the
+   HOST also caps an unsized read (~64 KB, line-aligned, with
+   `next_offset` + a hint), so a big read can't outlive a tight tool-call
+   limit either (that is what ends a call with "Request Ended"). For a
+   big file: `search` to find the region, then `--lines A-B` in windows
+   of ~150 lines. `--raw` is bounded (256 KB) on the terminal — don't add
+   it by reflex; use `--to FILE` to save a whole file.
 3. **Batch your loops** — 21 stats took 3.8 s one-by-one vs 0.21 s in one
    `batch`: **18× wall**. `batch` accepts write ops too: 12 writes
    (368 KB) in ONE call — and since v2.4.7, `edit` ops as well: a
@@ -418,8 +423,12 @@ by measured impact.
     future work, refused loudly never silently), NEVER targets the
     tool's own windows (own_window_refusal — the self-approval loop is
     dead by construction), and runs under a bounded drive session:
-    time cap + event cap (`screen_input_max_*` settings, violation =
-    `drive_cap_exceeded` and the grant is dropped), an always-on-top
+    time cap + event cap (`screen_input_max_*` settings; when input
+    injection is "Ask each time", a violation = `drive_cap_exceeded` and
+    the grant is dropped; when the host pre-approved it — "once per
+    session" or "always" — the capped session is RENEWED automatically
+    (v2.8.6, with an `[INPUT CONTROL] … RENEWED` Inbox note), so you do
+    not get re-prompted; a human disarm still stops you), an always-on-top
     "click to disarm" banner, and on X11 sessions ANY physical input
     disarms it (XI2 raw events; injected events produce none). Every
     input event is op-logged at WARN. `input key` takes X11 keysym

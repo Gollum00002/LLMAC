@@ -939,6 +939,7 @@ class HostWindow(QMainWindow):
         self.settings.setdefault("screen_input_enabled", False)
         self.settings.setdefault("screen_shots_approval", "per_shot")
         self.settings.setdefault("screen_input_approval", "per_shot")
+        self.settings.setdefault("screen_input_auto_renew", True)
         self.settings.setdefault("screen_shot_dir", DEFAULT_SHOT_DIR)
         self.settings.setdefault("screen_input_max_minutes", 10)
         self.settings.setdefault("screen_input_max_events", 500)
@@ -989,6 +990,7 @@ class HostWindow(QMainWindow):
         self._chat_timer: Optional[QTimer] = None      # v2.5.0
         self._chat_agent: Optional[str] = None
         self._chat_last_render: str = ""
+        self._chat_render_agent = None   # v2.8.6: whose thread is on screen
         self._chat_items: list = []                    # v2.6.0 (ASK-014)
         self._chat_search_idx: int = 0                # v2.6.0 (ASK-014)
         self._chat_export_dir: str = ""               # v2.6.0 (ASK-014)
@@ -1808,6 +1810,18 @@ class HostWindow(QMainWindow):
         crow.addWidget(QLabel("events"))
         crow.addStretch()
         cv2.addLayout(crow)
+        # v2.8.6: auto-renew a capped drive session under a pre-approved
+        # mode instead of dropping the approval (the agent re-prompting
+        # after the time cap was the bug this fixes).
+        self.screen_input_renew_check = QCheckBox(
+            "Auto-renew a capped drive session when input injection is "
+            "'Ask once per session' / 'Always approve'")
+        self.screen_input_renew_check.setChecked(
+            bool(self.settings.get("screen_input_auto_renew", True)))
+        self.screen_input_renew_check.toggled.connect(
+            lambda on: self._save_screen_setting(
+                "screen_input_auto_renew", bool(on)))
+        cv2.addWidget(self.screen_input_renew_check)
         sdesc = QLabel(
             "Approval mode per class: Ask each time (default), Ask once "
             "per session (first approval covers that agent until the app "
@@ -2591,6 +2605,16 @@ class HostWindow(QMainWindow):
             "Select an agent on the left — its notes and your messages "
             "appear here as one thread.")
         right.addWidget(self.chat_view, 1)
+        # v2.8.6: keep the reader's scroll position across re-renders.
+        # Qt lays a long document out LAZILY, so the scrollbar range keeps
+        # growing after setHtml() returns; the target (bottom, or the
+        # reader's old position) is re-applied on every range change until
+        # the reader scrolls themselves.
+        self._chat_scroll_target = None
+        self._chat_scroll_token = 0
+        _csb = self.chat_view.verticalScrollBar()
+        _csb.rangeChanged.connect(self._chat_on_range_changed)
+        _csb.actionTriggered.connect(self._chat_user_scrolled)
         # v2.6.0 (ASK-014): search + export — the readable thread
         # becomes a usable one; an export is the durable evidence
         # artifact a rule-6 capture cites.
@@ -2664,6 +2688,8 @@ class HostWindow(QMainWindow):
                 snap = self.ctx.sessions.agents_snapshot()
             except Exception:
                 pass
+        list_sb = self.chat_agent_list.verticalScrollBar()
+        list_scroll = list_sb.value()
         self.chat_agent_list.blockSignals(True)
         self.chat_agent_list.clear()
         for s in sorted(snap, key=lambda x: x["agent"]):
@@ -2686,10 +2712,12 @@ class HostWindow(QMainWindow):
             if s["agent"] == prev:
                 self.chat_agent_list.setCurrentItem(item)
         self.chat_agent_list.blockSignals(False)
+        list_sb.setValue(min(list_scroll, list_sb.maximum()))
         if prev and prev not in {s["agent"] for s in snap}:
             # the selected agent's session was reset away
             self._chat_agent = None
             self._chat_last_render = ""
+            self._chat_render_agent = None
             self._chat_items = []
             self._chat_search_idx = 0
             self.chat_view.clear()
@@ -2771,10 +2799,24 @@ class HostWindow(QMainWindow):
             return
         self._chat_last_render = render
         sb = self.chat_view.verticalScrollBar()
-        at_bottom = sb.value() >= sb.maximum() - 4
+        # v2.8.6: setHtml() snaps the view to the TOP, and the old code
+        # only undid that when the view was already at the bottom — so a
+        # reader scrolled up in a long thread was thrown back to the
+        # first message every time a new one arrived (and a live search
+        # re-jumped it on every refresh). Remember where the reader was
+        # and put them back: follow new messages only when they were
+        # already at the bottom; a freshly opened thread starts at the
+        # bottom (latest messages).
+        new_thread = (getattr(self, "_chat_render_agent", None)
+                      != self._chat_agent)
+        old_val = sb.value()
+        at_bottom = new_thread or old_val >= sb.maximum() - 4
+        self._chat_scroll_target = "bottom" if at_bottom else old_val
+        self._chat_scroll_token += 1
+        token = self._chat_scroll_token
         self.chat_view.setHtml(render)
-        if at_bottom:
-            sb.setValue(sb.maximum())
+        self._chat_render_agent = self._chat_agent
+        self._chat_apply_scroll_target()
         # v2.6.0 (ASK-014): setHtml reset the cursor — re-apply the
         # live search so it survives the 1 s re-render.
         term, n = self._chat_thread_hits()
@@ -2782,6 +2824,32 @@ class HostWindow(QMainWindow):
             self._chat_apply_search(n)
             self.chat_search_hits.setText(
                 f"{self._chat_search_idx + 1}/{n}")
+        # the search jump (ensureCursorVisible) must not move a reader
+        # who did not ask for it.
+        self._chat_apply_scroll_target()
+        # the layout settles within a moment; stop pinning after that
+        QTimer.singleShot(
+            1500, lambda t=token: self._chat_release_scroll_target(t))
+
+    def _chat_apply_scroll_target(self) -> None:
+        tgt = getattr(self, "_chat_scroll_target", None)
+        if tgt is None:
+            return
+        bar = self.chat_view.verticalScrollBar()
+        bar.setValue(bar.maximum() if tgt == "bottom"
+                     else min(int(tgt), bar.maximum()))
+
+    def _chat_on_range_changed(self, _lo: int, _hi: int) -> None:
+        self._chat_apply_scroll_target()
+
+    def _chat_user_scrolled(self, _action: int) -> None:
+        """The reader moved the view (wheel / drag / keys — programmatic
+        setValue does not emit actionTriggered): stop re-applying."""
+        self._chat_scroll_target = None
+
+    def _chat_release_scroll_target(self, token: int) -> None:
+        if token == self._chat_scroll_token:
+            self._chat_scroll_target = None
 
     # ------------------------------------------------------------------
     # v2.6.0 (ASK-014) — transcript search + export
@@ -3183,6 +3251,12 @@ class HostWindow(QMainWindow):
         n = self.ctx.screen_drive.close_all()
         if not n:
             return
+        # v2.8.6: with auto-renewal an agent could re-open control right
+        # after a disarm, so a human disarm also revokes the
+        # until-restart input grant ('Ask once per session' then asks
+        # again). 'Always approve' is a standing setting - change it in
+        # the Security tab to stop an agent for good.
+        self.ctx.screen_session_grants.pop("screen_input", None)
         self.ctx.op_log("WARN", f"DRIVE DISARMED — {n} session(s) "
                                 f"closed from the host GUI")
         self._log(f"Drive session DISARMED ({n} closed).", "WARN")

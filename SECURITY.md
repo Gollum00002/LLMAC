@@ -143,7 +143,8 @@ approval flow with a countdown. Your sudo password, if you store one, is held
 in memory only, never written to disk or logs, never returned by any API, and
 never appears in process arguments.
 
-**Abuse resistance.** Server-enforced caps: 16 MB request body, 5 MB per read,
+**Abuse resistance.** Server-enforced caps: 16 MB request body, 5 MB per read
+(64 KB by default unless the caller asks for more),
 1 MB exec output (head and tail kept), 600 s hard exec timeout, 16 concurrent
 requests, 4 concurrent execs, 8 background processes, 64 operations per batch,
 5,000 entries / 256 MB per archive.
@@ -175,7 +176,15 @@ for real isolation.
 - **Input injection (drive mode)**: off until `screen_input_enabled` is switched
   on. The first input op needs approval and opens a **bounded session** (default
   500 events or 10 minutes), after which it closes. Sessions are logged,
-  bannered in the GUI and can be disarmed in one click.
+  bannered in the GUI and can be disarmed in one click. If you chose
+  **Ask once per session** or **Always approve** for input injection, a
+  session that reaches its cap is **renewed automatically** (v2.8.6; each
+  renewal is a WARN log line plus an `[INPUT CONTROL]` note in the Inbox) so
+  the agent is not re-prompted. That is the point of those modes, but it means
+  the caps no longer force a new human decision there. Untick *Auto-renew a
+  capped drive session* (`screen_input_auto_renew`) to make every cap hit need
+  a fresh approval. **Ask each time** never auto-renews. Disarming (banner or
+  physical input on X11) also revokes the "once per session" approval.
 
 Observation and input depend on optional packages (`pytesseract`, `Pillow`,
 `python-xlib`) installed in the host's virtualenv. They are not required to run

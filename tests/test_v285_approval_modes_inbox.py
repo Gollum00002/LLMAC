@@ -116,9 +116,13 @@ class TestInputModes(unittest.TestCase):
         self.assertEqual(box["r"][1], 403)
         self.assertEqual(host.ctx.sessions.unseen_total(), 0)
 
-    def test_session_mode_regrant_after_cap_exceeded(self):
+    def test_session_mode_cap_exceeded_without_auto_renew(self):
+        # v2.8.6: the pre-2.8.6 behaviour (a cap hit drops the session
+        # grant and the next op needs a fresh approval) is kept behind
+        # screen_input_auto_renew=False.
         host = _host(screen_input_approval="session",
-                     screen_input_max_events=1)
+                     screen_input_max_events=1,
+                     screen_input_auto_renew=False)
         self.addCleanup(host.stop)
         t, box = _post_thread(host, "/input/mouse",
                               {"action": "move", "x": 1, "y": 1})

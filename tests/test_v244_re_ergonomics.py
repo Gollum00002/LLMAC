@@ -284,7 +284,7 @@ class TestVersion(unittest.TestCase):
         try:
             resp, status = host.req("GET", "/info")
             self.assertEqual(status, 200)
-            self.assertEqual(resp["version"], "2.8.3")
+            self.assertEqual(resp["version"], "2.8.4")
         finally:
             host.stop()
 

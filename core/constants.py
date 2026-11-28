@@ -7,7 +7,7 @@ import os
 # Identity / protocol
 # ---------------------------------------------------------------------------
 
-LLMAC_VERSION = "2.8.3"
+LLMAC_VERSION = "2.8.4"
 KEY_PREFIX = "llmac_"
 STATE_SCHEMA_VERSION = 2
 EXPORT_FORMAT = "llmac-session-export"
@@ -37,6 +37,17 @@ LISTEN_BACKLOG = 128
 
 MAX_BODY_BYTES = 16 * 1024 * 1024          # 16 MB request body
 MAX_READ_BYTES = 5 * 1024 * 1024           # 5 MB per read call (offset/limit allows paging)
+# v2.8.6: DEFAULT size of one read response. A whole-file read (no limit /
+# max_bytes / raw) of a bigger file returns only this much, line-aligned,
+# with truncated + next_offset + a hint — a weak/slow agent with a tight
+# tool-call limit no longer ends a call with "Request Ended" just because it
+# asked for a big file. Explicit limit / max_bytes / raw=true still go up to
+# MAX_READ_BYTES. Line-range reads (from_line/to_line) obey the same cap on
+# the RESPONSE and stream the file instead of loading it.
+READ_DEFAULT_BYTES = 64 * 1024
+# Counting total_lines scans the file (C-speed newline count); above this
+# size total_lines is reported as null rather than scanning.
+READ_LINE_COUNT_MAX_BYTES = 64 * 1024 * 1024
 MAX_SEARCH_RESULTS = 200                   # grep/glob hits per call
 MAX_SEARCH_FILES = 3000                   # files walked per search
 MAX_TREE_ENTRIES = 500

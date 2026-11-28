@@ -81,7 +81,7 @@ try:
     # elsewhere, but guarded here it keeps --version honest forever).
     from core.constants import LLMAC_VERSION as VERSION
 except ImportError:
-    VERSION = "2.8.3"   # standalone release-file fallback — keep in sync
+    VERSION = "2.8.4"   # standalone release-file fallback — keep in sync
 CONNECTIONS_FILE = os.path.join(
     os.path.expanduser("~"), ".llmac", "connections.json")
 # v2.8.3: TCP connect + TLS handshake deadline (seconds), independent of
@@ -838,6 +838,11 @@ def cmd_tree(args) -> int:
 
 # ---- read/write/edit ------------------------------------------------------------
 
+# v2.8.6: largest read --raw prints to the terminal (use --to FILE for
+# whole files). The host's own default cap is READ_DEFAULT_BYTES (64 KB).
+RAW_STDOUT_CAP = 256 * 1024
+
+
 def cmd_read(args) -> int:
     # v2.4.8 post-release guard: --find-hex/--find-text ride the hex
     # reader. The server 400s find_needs_hex; the CLI must refuse just
@@ -869,6 +874,15 @@ def cmd_read(args) -> int:
         payload["limit"] = args.limit
     if args.max_bytes:
         payload["max_bytes"] = args.max_bytes
+    # v2.8.6: the host now pages unsized reads (default ~64 KB). --to FILE
+    # is a download -> full size; --raw to the terminal asks for more but
+    # is still bounded (RAW_STDOUT_CAP), so a reflexive --raw cannot flood
+    # a small model's context or outlive its tool-call limit.
+    _to_file = bool(args.to) and args.to != "-"
+    if getattr(args, "raw", False) or _to_file:
+        payload["raw"] = True
+        if not _to_file and not args.max_bytes:
+            payload["max_bytes"] = RAW_STDOUT_CAP
     if getattr(args, "hex_flag", False):
         payload["hex"] = True
         # v2.4.8: the find (GOTO/search) primitive — bytes or literal
@@ -880,6 +894,7 @@ def cmd_read(args) -> int:
         if getattr(args, "max_hits", None):
             payload["find_max_hits"] = args.max_hits
     resp, status = c.post("/read", payload)
+    head_only = False       # v2.8.6: set when the head-only hint was printed
     if status == 0:
         return _err(resp.get("message", "connection failed"), 3)
     if "error" in resp:
@@ -972,7 +987,21 @@ def cmd_read(args) -> int:
             smart = (not ranged and not getattr(args, "raw", False)
                      and not args.numbered and len(text) > 32768
                      and len(lines) > 251)
-            if smart:
+            if smart and resp.get("soft_capped"):
+                # v2.8.6: the host already cut this read short, so the
+                # last lines we hold are NOT the end of the file — show
+                # the head only and say exactly where to continue.
+                head = "\n".join(lines[:200]) + "\n"
+                consumed = len(head.encode("utf-8"))
+                head_only = True
+                sys.stdout.write(head)
+                print(f"[smart-truncated: showed the first 200 lines "
+                      f"(bytes 0-{consumed}) of a {resp.get('size', '?')}"
+                      f"-byte file. Continue with --offset {consumed} "
+                      f"--limit 16384, or --lines 201-400; use `search` "
+                      f"to locate a region; --to FILE saves everything]",
+                      file=sys.stderr)
+            elif smart:
                 omitted = len(lines) - 250
                 sys.stdout.write("\n".join(lines[:200]) + "\n")
                 print(f"[smart-truncated: {omitted} lines omitted "
@@ -987,7 +1016,34 @@ def cmd_read(args) -> int:
                     sys.stdout.write(text)
                 except BrokenPipeError:
                     pass
-    if resp.get("truncated"):
+    if resp.get("soft_capped"):
+        # v2.8.6: host-side default cap (the head-only smart truncation
+        # above already explained it; one line for every other case)
+        if not head_only:
+            nxt = resp.get("next_offset")
+            print(f"[read capped at {len(resp.get('content', ''))} of "
+                  f"{resp.get('size', '?')} bytes — continue with --offset "
+                  f"{nxt} --limit 16384, or --lines A-B (use `search` to "
+                  f"locate a region); --raw / --max-bytes for more, --to "
+                  f"FILE to save everything]", file=sys.stderr)
+    elif resp.get("next_line"):
+        nl = resp["next_line"]
+        print(f"[lines {resp['lines'][0]}-{resp['lines'][1]} of "
+              f"{resp.get('total_lines') if resp.get('total_lines') is not None else '?'}"
+              f" — response cap reached; continue with --lines "
+              f"{nl}-{nl + 199}]", file=sys.stderr)
+    elif resp.get("line_cut"):
+        print(f"[line {resp['lines'][1]} is longer than the response cap "
+              f"and was cut; read it in pieces with --offset/--limit]",
+              file=sys.stderr)
+    elif resp.get("truncated") and payload.get("raw") and not _to_file:
+        # --raw to the terminal hit RAW_STDOUT_CAP (or --max-bytes)
+        nxt = resp.get("next_offset")
+        print(f"[read capped at {len(resp.get('content', ''))} of "
+              f"{resp.get('size', '?')} bytes — continue with --offset "
+              f"{nxt}, or use --to FILE to save everything]",
+              file=sys.stderr)
+    elif resp.get("truncated"):
         nxt = resp.get("next_offset")
         hint = (f" (continue with --offset {nxt})" if nxt else "")
         print(f"[truncated{hint}]", file=sys.stderr)
@@ -2933,8 +2989,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--numbered", action="store_true",
                     help="Prefix line numbers.")
     sp.add_argument("--raw", action="store_true",
-                    help="Byte-exact full text; disables smart truncation "
-                         "of large files (A4).")
+                    help="Byte-exact text; disables smart truncation (A4). "
+                         "v2.8.6: still capped at 256 KB on the terminal "
+                         "— use --to FILE to save a whole file.")
     sp.add_argument("--to", default=None,
                     help="Write to a local file instead of stdout ('-' = stdout).")
     sp.set_defaults(func=cmd_read)

@@ -48,6 +48,7 @@ from .constants import (
     MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, MAX_BODY_BYTES,
     MAX_BATCH_OPS, MAX_BATCH_RESPONSE_BYTES, MAX_CONCURRENT_EXEC,
     MAX_CONCURRENT_REQUESTS, MAX_DIFF_BYTES, MAX_READ_BYTES,
+    READ_DEFAULT_BYTES, READ_LINE_COUNT_MAX_BYTES,
     SLOT_WAIT_EXEC_S, SLOT_WAIT_REQ_S,
     EXEC_WAIT_MAX_S, EXEC_RESULT_POLL_MAX_S, EXEC_JOB_KEEP, EXEC_JOB_KEEP_S,
     MAX_SEARCH_RESULTS, OP_RING_CAP, OVERVIEW_BUDGET_DEFAULT,
@@ -1127,6 +1128,116 @@ def h_tree(h, ctx: AppContext, agent: dict, p: dict) -> dict:
                       protected=ctx.sandbox.protected)
 
 
+
+def _count_lines(path: str, size: int):
+    """Total line count by a chunked newline count (C speed, constant
+    memory). None for files above READ_LINE_COUNT_MAX_BYTES."""
+    if size == 0:
+        return 0
+    if size > READ_LINE_COUNT_MAX_BYTES:
+        return None
+    n = 0
+    last = b""
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1 << 20)
+            if not chunk:
+                break
+            n += chunk.count(b"\n")
+            last = chunk[-1:]
+    return n + (0 if last == b"\n" else 1)
+
+
+def _trim_partial_utf8(data: bytes) -> bytes:
+    """Drop an incomplete multi-byte sequence at the END of a truncated
+    read so a slice that happens to end mid-character is not mistaken for
+    binary."""
+    try:
+        data.decode("utf-8")
+        return data
+    except UnicodeDecodeError as e:
+        if e.reason == "unexpected end of data" and e.start >= len(data) - 3:
+            return data[:e.start]
+        return data
+
+
+def _read_line_window(path: str, size: int, s: int, e_req, numbered: bool,
+                      cap: int) -> dict:
+    """Stream lines s..e_req of a text file (1-based, inclusive) WITHOUT
+    loading the file: memory and time are bounded by the window, not the
+    file, and files of any size work. The response text is capped at `cap`
+    bytes at a LINE boundary; a capped window reports truncated + next_line
+    so the caller continues exactly where it stopped."""
+    total = _count_lines(path, size)
+    if total is not None:
+        e = min(total, e_req) if e_req else total
+        if s > total or e < s:
+            raise OpBlocked(400, {"error": "range_invalid",
+                                  "message": f"lines {s}-{e} invalid for "
+                                  f"{total} lines."})
+    else:
+        e = e_req
+        if e is not None and e < s:
+            raise OpBlocked(400, {"error": "range_invalid",
+                                  "message": f"lines {s}-{e} invalid."})
+    out: list = []
+    used = 0
+    last = 0
+    n = 0
+    truncated = False
+    cut_line = False
+    with open(path, "rb") as f:
+        for raw in f:
+            n += 1
+            if n < s:
+                continue
+            if e is not None and n > e:
+                break
+            body = raw[:-1] if raw.endswith(b"\n") else raw
+            try:
+                txt = body.decode("utf-8")
+            except UnicodeDecodeError:
+                raise OpBlocked(400, {
+                    "error": "binary_file",
+                    "message": "Line-range reads need a text file. Use "
+                               "offset/limit for binary."}) from None
+            piece = f"{n:>6}\t{txt}" if numbered else txt
+            add = len(piece.encode("utf-8")) + (1 if out else 0)
+            if out and used + add > cap:
+                truncated = True
+                break
+            if not out and add > cap:
+                # one line bigger than the whole cap: cut it, loudly
+                piece = piece.encode("utf-8")[:cap].decode(
+                    "utf-8", "ignore")
+                add = len(piece.encode("utf-8"))
+                cut_line = True
+                truncated = True
+            out.append(piece)
+            used += add
+            last = n
+            if cut_line:
+                break
+    if not out:
+        raise OpBlocked(400, {"error": "range_invalid",
+                              "message": f"lines {s}-{e or s} invalid for "
+                              f"{n} lines."})
+    resp = {"content": "\n".join(out), "binary": False,
+            "lines": [s, last], "total_lines": total}
+    if truncated:
+        resp["truncated"] = True
+        if cut_line:
+            resp["line_cut"] = True
+            resp["hint"] = (
+                f"line {last} is longer than the {cap}-byte response cap "
+                f"and was cut; read it in pieces with offset/limit.")
+        else:
+            resp["next_line"] = last + 1
+            resp["hint"] = (
+                f"Capped at {cap} bytes (lines {s}-{last}); continue with "
+                f"from_line={last + 1}, or raise max_bytes.")
+    return resp
+
 @route("POST", "/read")
 def h_read(h, ctx: AppContext, agent: dict, p: dict) -> dict:
     target = p.get("path", "")
@@ -1173,8 +1284,30 @@ def h_read(h, ctx: AppContext, agent: dict, p: dict) -> dict:
     limit = p.get("limit")
     numbered = bool(p.get("numbered", False))
     max_bytes = min(int(p.get("max_bytes") or MAX_READ_BYTES), MAX_READ_BYTES)
+    # v2.8.6: the DEFAULT response is READ_DEFAULT_BYTES. A caller that
+    # states a size (limit / max_bytes) or asks for raw=true gets what it
+    # asked for, up to MAX_READ_BYTES; everyone else is paged.
+    explicit_size = (limit is not None or bool(p.get("max_bytes"))
+                     or bool(p.get("raw")))
+    cap = max_bytes if explicit_size else min(max_bytes, READ_DEFAULT_BYTES)
 
     size = os.path.getsize(path)
+
+    # v2.8.6: line-range reads STREAM the file (any size, memory bounded
+    # by the window) instead of reading up to 5 MB and slicing. Binary
+    # files, offset-relative ranges and hex fall through to the paths
+    # below, unchanged.
+    if ((from_line is not None or to_line is not None)
+            and offset is None and not p.get("hex")):
+        with open(path, "rb") as f:
+            sample = f.read(65536)
+        if not _looks_binary(sample):
+            s0 = max(1, int(from_line or 1))
+            e0 = int(to_line) if to_line else None
+            win = _read_line_window(path, size, s0, e0, numbered, cap)
+            win.update({"path": path, "version": version, "size": size})
+            return win
+
     with open(path, "rb") as f:
         if p.get("hex"):
             # v2.4.7: server-side hex dump — the RE primitive for binary
@@ -1247,12 +1380,33 @@ def h_read(h, ctx: AppContext, agent: dict, p: dict) -> dict:
         if offset is not None:
             offset = max(0, int(offset))
             f.seek(offset)
-            n = max_bytes if limit is None else min(int(limit), max_bytes)
-            data = f.read(n)
-        else:
-            data = f.read(max_bytes)
+        # v2.8.6: `limit` is honoured WITHOUT an offset too (it used to be
+        # silently ignored then, so `read --limit N` returned the whole
+        # file).
+        n = cap if limit is None else min(max(0, int(limit)), max_bytes)
+        data = f.read(n)
 
     truncated = size > (offset or 0) + len(data)
+    soft_capped = False
+    if truncated and not _looks_binary(data):
+        if not explicit_size:
+            # default cap: end on a line boundary so next_offset lands on
+            # a line start and nothing is cut mid-line
+            nl = data.rfind(b"\n")
+            if nl > len(data) // 2:
+                data = data[:nl + 1]
+            soft_capped = True
+        data = _trim_partial_utf8(data)
+    elif truncated and not explicit_size:
+        soft_capped = True
+    extra: dict = {}
+    if soft_capped:
+        nxt = (offset or 0) + len(data)
+        extra = {"soft_capped": True, "hint": (
+            f"Default read cap: returned {len(data)} of {size} bytes. "
+            f"Continue with offset={nxt} (add limit=N), or from_line/"
+            f"to_line (search first to locate the region); raw=true or "
+            f"max_bytes=N for a bigger slice.")}
     # Binary-looking content (NUL / control bytes that still decode as
     # UTF-8) is returned as base64 — never as json-escaped text (F28).
     if _looks_binary(data):
@@ -1260,7 +1414,7 @@ def h_read(h, ctx: AppContext, agent: dict, p: dict) -> dict:
                 "content_b64": base64.b64encode(data).decode(),
                 "binary": True, "truncated": truncated, "version": version,
                 "size": size, "next_offset": (offset or 0) + len(data)
-                if truncated else None}
+                if truncated else None, **extra}
 
     if from_line is not None or to_line is not None:
         # Line-range read (text): decode whole file up to cap then slice.
@@ -1302,13 +1456,13 @@ def h_read(h, ctx: AppContext, agent: dict, p: dict) -> dict:
         return {"path": path, "content": text, "binary": False,
                 "truncated": truncated, "version": version,
                 "size": size, "next_offset": (offset or 0) + len(data)
-                if truncated else None}
+                if truncated else None, **extra}
     except UnicodeDecodeError:
         return {"path": path,
                 "content_b64": base64.b64encode(data).decode(),
                 "binary": True, "truncated": truncated, "version": version,
                 "size": size, "next_offset": (offset or 0) + len(data)
-                if truncated else None}
+                if truncated else None, **extra}
 
 
 @route("POST", "/stat")
@@ -2856,20 +3010,76 @@ def _input_floor(ctx: AppContext) -> None:
                        "only; the libei/portal route is future work."})
 
 
+def _input_auto_mode(ctx: AppContext, agent: dict):
+    """v2.8.6: 'always' | 'session' when the HOST has already pre-approved
+    input injection for this agent (Security -> Input injection approval),
+    else None. Only then may a capped drive session renew itself without a
+    new click: the human chose "no more prompts" in the GUI, so a cap that
+    merely bounds ONE drive session must not silently revoke that choice.
+    `screen_input_auto_renew` (default True) is the off-switch for hosts
+    that want every cap hit to cost a fresh approval, as before 2.8.6.
+    'per_shot' (ask each time) never auto-renews."""
+    if not ctx.settings.get("screen_input_auto_renew", True):
+        return None
+    mode = str(ctx.settings.get("screen_input_approval", "per_shot")
+               or "per_shot")
+    if mode == "always":
+        return "always"
+    if (mode == "session" and agent["name"] in
+            (ctx.screen_session_grants.get("screen_input") or ())):
+        return "session"
+    return None
+
+
+def _open_drive_session(ctx: AppContext, agent: dict) -> tuple:
+    """Open a bounded drive session with the caps from settings; returns
+    (max_events, max_minutes). Shared by the first open (after an
+    approval) and the v2.8.6 auto-renewal; callers do the logging."""
+    max_events = int(ctx.settings.get(
+        "screen_input_max_events", SCREEN_INPUT_MAX_EVENTS_DEFAULT))
+    max_minutes = float(ctx.settings.get(
+        "screen_input_max_minutes", SCREEN_INPUT_MAX_MINUTES_DEFAULT))
+    ctx.screen_drive.open(agent["name"], max_events, max_minutes)
+    return max_events, max_minutes
+
+
 def _drive_gate(ctx: AppContext, agent: dict, summary: str) -> dict:
     """Bounded drive mode. The FIRST input op needs the screen_input
     approval (forced, session-grant-able) and OPENS the session; every
     op re-authorizes against the caps BEFORE injecting. A violation
     closes the session and refuses with drive_cap_exceeded naming the
-    cap it hit."""
+    cap it hit — EXCEPT (v2.8.6) when the host has pre-approved input
+    injection ('Ask once per session' with a live grant, or 'Always
+    approve'): then the capped session is renewed in place, loudly (WARN
+    log, event, Inbox note), and the op proceeds. Before 2.8.6 a cap hit
+    dropped the session grant, so the agent's next request prompted again
+    even though the human had chosen auto-approval."""
     sess, reason = ctx.screen_drive.authorize(agent["name"])
+    if reason in ("events", "time"):
+        auto = _input_auto_mode(ctx, agent)
+        if auto:
+            which = "event cap" if reason == "events" else "time cap"
+            max_events, max_minutes = _open_drive_session(ctx, agent)
+            ctx.op_log("WARN", f"DRIVE SESSION RENEWED ({reason} cap hit) "
+                               f"for {agent['name']} under '{auto}' "
+                               f"approval — {max_events} events / "
+                               f"{max_minutes:g} min", agent=agent)
+            ctx.events.emit("drive_session", {
+                "agent": agent["name"], "state": "renewed",
+                "reason": reason, "max_events": max_events,
+                "max_minutes": max_minutes})
+            ctx.sessions.note(
+                agent["name"],
+                f"[INPUT CONTROL] My input-control session reached its "
+                f"{which} and was RENEWED automatically because input "
+                f"injection is set to '{auto}' approval. Limits: "
+                f"{max_events} events / {max_minutes:g} min. You can "
+                f"disarm me any time with the red banner.")
+            ctx.events.emit("note", {"agent": agent["name"]})
+            sess, reason = ctx.screen_drive.authorize(agent["name"])
     if reason == "no_session":
         _screen_gate(ctx, agent, "screen_input", summary)
-        max_events = int(ctx.settings.get(
-            "screen_input_max_events", SCREEN_INPUT_MAX_EVENTS_DEFAULT))
-        max_minutes = float(ctx.settings.get(
-            "screen_input_max_minutes", SCREEN_INPUT_MAX_MINUTES_DEFAULT))
-        ctx.screen_drive.open(agent["name"], max_events, max_minutes)
+        max_events, max_minutes = _open_drive_session(ctx, agent)
         ctx.op_log("WARN", f"DRIVE SESSION OPEN {agent['name']} — "
                            f"{max_events} events / {max_minutes} min",
                    agent=agent)
@@ -2895,6 +3105,9 @@ def _drive_gate(ctx: AppContext, agent: dict, summary: str) -> dict:
         # this agent: exceeding the bound costs the approval coverage,
         # so the caps are a real bound, not a soft bump — the next input
         # op needs a fresh human approval no matter what was granted.
+        # (Only reached when the host did NOT pre-approve: per-shot mode,
+        # screen_input_auto_renew off, or a renewal that itself hit a cap
+        # of 0.)
         granted = ctx.screen_session_grants.get("screen_input")
         if granted:
             granted.discard(agent["name"])

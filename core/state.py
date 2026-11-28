@@ -104,6 +104,9 @@ def default_settings() -> dict:
         # v2.8.5: approval mode per class — per_shot | session | always
         "screen_shots_approval": "per_shot",
         "screen_input_approval": "per_shot",
+        # v2.8.6: a capped drive session renews itself (loudly) when input
+        # injection is pre-approved ('session' with a grant, or 'always').
+        "screen_input_auto_renew": True,
         "screen_shot_dir": DEFAULT_SHOT_DIR,
         "screen_input_max_minutes": SCREEN_INPUT_MAX_MINUTES_DEFAULT,
         "screen_input_max_events": SCREEN_INPUT_MAX_EVENTS_DEFAULT,
